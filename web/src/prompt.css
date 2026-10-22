@@ -1,0 +1,46 @@
+/* Prompt page / report UI */
+body {
+  background:
+    radial-gradient(900px 400px at 10% -10%, rgba(58,105,184,0.18), transparent 60%),
+    radial-gradient(700px 400px at 100% 0%, rgba(20,184,166,0.14), transparent 60%),
+    linear-gradient(135deg, #f4f7f9 0%, #e0e8f0 100%);
+  background-attachment: fixed;
+}
+.fade-in { animation: fadeUp 0.5s ease both; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+.hero-card {
+  background: rgba(255,255,255,0.9);
+  border: 1px solid rgba(31,71,136,0.08);
+  border-radius: 20px;
+  padding: 2rem;
+  box-shadow: 0 20px 50px -20px rgba(18,44,84,0.25);
+}
+.hero-card h1 { font-size: 1.9rem; font-weight: 700; color: #122c54; line-height: 1.2; margin: 0.6rem 0; letter-spacing: -0.02em; }
+.hero-card > p { color: #475569; margin-bottom: 1.4rem; }
+.eyebrow { display: inline-block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #0f766e; background: #ccfbf1; padding: 0.25rem 0.7rem; border-radius: 999px; }
+.prompt-box { width: 100%; min-height: 150px; resize: vertical; padding: 1rem 1.1rem; font-size: 1.05rem; line-height: 1.6; border-radius: 14px; border: 1.5px solid rgba(31,71,136,0.15); background: #f8fafc; transition: all .2s; }
+.prompt-box:focus { outline: none; background: #fff; border-color: #1f4788; box-shadow: 0 0 0 4px rgba(31,71,136,0.1); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; }
+.chip { font-size: 0.78rem; text-align: left; padding: 0.4rem 0.8rem; border-radius: 999px; background: #eef3fa; color: #1f4788; border: 1px solid transparent; cursor: pointer; transition: all .15s; }
+.chip:hover { background: #fff; border-color: #3a69b8; transform: translateY(-1px); }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; align-items: center; margin-top: 1.5rem; padding-top: 1.2rem; border-top: 1px solid #e2e8f0; }
+.hint { font-size: 0.75rem; color: #64748b; }
+
+.tabs { display: flex; gap: 0.5rem; margin-bottom: -1px; position: relative; z-index: 1; overflow-x: auto; }
+.tab { display: flex; flex-direction: column; align-items: flex-start; padding: 0.7rem 1.2rem; border-radius: 12px 12px 0 0; background: rgba(255,255,255,0.55); border: 1px solid transparent; font-weight: 600; color: #475569; cursor: pointer; transition: all .2s; }
+.tab small { font-weight: 400; font-size: 0.7rem; color: #94a3b8; }
+.tab:hover { background: rgba(255,255,255,0.85); }
+.tab-active { background: #fff; color: #122c54; border-color: rgba(31,71,136,0.12); border-bottom-color: #fff; box-shadow: inset 0 3px 0 #1f4788; }
+
+.report-card { background: #fff; border: 1px solid rgba(31,71,136,0.12); border-radius: 0 16px 16px 16px; padding: 1.6rem; box-shadow: 0 20px 50px -25px rgba(18,44,84,0.3); }
+.report-head { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; align-items: center; padding-bottom: 1rem; border-bottom: 2px solid #eef3fa; margin-bottom: 0.5rem; }
+.report-head h2 { font-size: 1.25rem; font-weight: 700; color: #122c54; letter-spacing: 0.02em; }
+.word-badge { display: inline-block; margin-top: 0.3rem; font-size: 0.72rem; font-weight: 600; color: #0f766e; background: #ccfbf1; padding: 0.15rem 0.6rem; border-radius: 999px; }
+.report-section { padding: 0.9rem 0 0.9rem 1rem; border-left: 3px solid #dbe6f5; margin-top: 0.9rem; }
+.report-section:nth-of-type(4) { border-left-color: #1f4788; background: #f4f8fd; border-radius: 0 10px 10px 0; padding-right: 1rem; }
+.report-section h3 { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #1f4788; margin-bottom: 0.35rem; }
+.report-section p { line-height: 1.7; color: #1e293b; white-space: pre-wrap; }
+.report-foot { margin-top: 1.4rem; padding: 0.7rem 1rem; font-size: 0.78rem; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; }
+
+@media (max-width: 640px) { .hero-card { padding: 1.2rem; } .hero-card h1 { font-size: 1.5rem; } }
