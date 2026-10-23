@@ -1,0 +1,40 @@
+
+name: Deploy Repogen to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            cd /var/www/repogen/Repogen-prompt
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            cd web
+            npm ci
+            npm run build
+
+            cd /var/www/repogen/Repogen-prompt
+            sudo systemctl restart repogen
+            sudo systemctl is-active --quiet repogen
+            sudo nginx -t
+            sudo systemctl reload nginx
