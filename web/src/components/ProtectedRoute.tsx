@@ -32,7 +32,7 @@ export function GuestRoute({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuth()
 
   if (isLoading) return <LoadingScreen />
-  if (token) return <Navigate to="/dashboard" replace />
+  if (token) return <Navigate to="/generate" replace />
   return <>{children}</>
 }
 
@@ -40,6 +40,6 @@ export function LandingRoute({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuth()
 
   if (isLoading) return <LoadingScreen />
-  if (token) return <Navigate to="/dashboard" replace />
+  if (token) return <Navigate to="/generate" replace />
   return <>{children}</>
 }

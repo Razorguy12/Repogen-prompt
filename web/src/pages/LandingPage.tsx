@@ -11,41 +11,41 @@ const fadeUp = {
 
 const features = [
   {
-    title: 'Structured Findings',
-    desc: 'AI generates anatomically organized findings with severity levels — ready for clinical review.',
-    icon: '📋',
+    title: 'Chat-style drafting',
+    desc: 'Describe the study and lock a house format. RadAI returns three drafts you can choose from.',
+    icon: '💬',
   },
   {
-    title: 'Doctor-in-the-Loop',
-    desc: 'Edit impressions, findings, and recommendations before finalizing. You stay in control.',
-    icon: '✏️',
+    title: 'Voice dictation',
+    desc: 'Speak findings into the prompt. Whisper transcribes them into the composer in real time.',
+    icon: '🎙️',
   },
   {
-    title: 'One-Click PDF Export',
-    desc: 'Download professionally formatted radiology reports instantly.',
-    icon: '📄',
+    title: 'Edit in Word',
+    desc: 'Open the chosen draft as a .docx, refine it in Microsoft Word, and keep a PDF copy too.',
+    icon: '📝',
   },
   {
-    title: 'Report History',
-    desc: 'Search, filter, and revisit past reports by patient ID, name, or modality.',
+    title: 'Timestamped library',
+    desc: 'Every generation is stored by date and time so yesterday’s cases are one click away.',
     icon: '🗂️',
   },
   {
-    title: 'Modality Templates',
-    desc: 'Pre-built templates for CT Chest, MRI Brain, Ultrasound, and more.',
-    icon: '🔬',
+    title: 'Three lengths, one case',
+    desc: 'Concise, standard, and detailed versions share the same facts — pick the voice that fits.',
+    icon: '📑',
   },
   {
-    title: 'Admin Management',
-    desc: 'Hospital admins can onboard radiologists and oversee report activity.',
-    icon: '👥',
+    title: 'Doctor-in-the-loop',
+    desc: 'Inline edit, copy, finalize. Nothing is signed until you say it is.',
+    icon: '✏️',
   },
 ]
 
 const steps = [
-  { num: '1', title: 'Enter Study Details', desc: 'Patient info, modality, clinical history — or pick a template.' },
-  { num: '2', title: 'AI Drafts Report', desc: 'Structured findings, impression, and recommendations in seconds.' },
-  { num: '3', title: 'Review & Export', desc: 'Edit, mark final, and download a professional PDF.' },
+  { num: '1', title: 'Prompt + format', desc: 'Type or dictate findings and, if you want, your preferred report layout.' },
+  { num: '2', title: 'Choose a draft', desc: 'Three alternatives are generated and filed under today’s timestamp.' },
+  { num: '3', title: 'Edit & export', desc: 'Tweak in the app or open in Word, then download PDF when you are ready.' },
 ]
 
 export default function LandingPage() {
@@ -58,11 +58,11 @@ export default function LandingPage() {
         <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
           <motion.div initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }}>
             <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-primary-dark leading-tight mb-4 sm:mb-6">
-              AI-Assisted Radiology Reporting in Minutes
+              A quiet workspace for radiology reports
             </h1>
             <p className="text-base sm:text-lg text-slate-600 mb-6 sm:mb-8 leading-relaxed">
-              RadAI Reports helps radiologists draft structured, clinically accurate reports faster —
-              with full editing control before you sign off.
+              Dictate findings, set the format, and choose among three AI drafts — then edit in Word
+              and keep every case on file by date.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
               <Link to="/login" className="btn btn-primary text-base sm:text-lg px-6 sm:px-8 py-3.5 sm:py-4 text-center">Get Started</Link>

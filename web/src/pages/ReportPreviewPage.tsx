@@ -36,16 +36,22 @@ export default function ReportPreviewPage() {
   })
 
   useEffect(() => {
-    if (data?.report_data) {
-      const rep = structuredClone(data.report_data)
-      if (data.scan_image && !rep.scan_image) {
-        rep.scan_image = data.scan_image
-        rep.scan_image_name = data.scan_image_name
-      }
-      setEditedReport(rep)
-      setIsDirty(false)
-      setIsEditMode(false)
+    if (data?.kind === 'prompt' || data?.input_params?.alternatives) {
+      navigate(`/generate?id=${reportId}`, { replace: true })
     }
+  }, [data, navigate, reportId])
+
+  useEffect(() => {
+    if (!data?.report_data) return
+    if (data.kind === 'prompt' || data.input_params?.alternatives) return
+    const rep = structuredClone(data.report_data) as RadiologyReport
+    if (data.scan_image && !rep.scan_image) {
+      rep.scan_image = data.scan_image
+      rep.scan_image_name = data.scan_image_name
+    }
+    setEditedReport(rep)
+    setIsDirty(false)
+    setIsEditMode(false)
   }, [data])
 
   useEffect(() => {

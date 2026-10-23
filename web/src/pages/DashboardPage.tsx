@@ -53,7 +53,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <AppHeader />
-      <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
         <div className="flex flex-wrap justify-between items-center gap-3 sm:gap-4 mb-6 sm:mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-primary-dark m-0">Welcome, {name}</h1>
           <Link to="/generate" className="btn btn-primary text-sm sm:text-base py-2 px-3.5 sm:px-4">
@@ -123,7 +123,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <h3 className="text-slate-500 font-medium mb-4">Previous Reports</h3>
+        <h3 className="text-slate-500 font-medium mb-4">Reports by date</h3>
 
         {isError ? (
           <div className="glass-panel p-8 text-center">
@@ -148,8 +148,26 @@ export default function DashboardPage() {
             <Link to="/generate" className="btn btn-primary">Create Your First Report</Link>
           </div>
         ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((r) => <ReportCard key={r.id} report={r} />)}
+          <div className="space-y-8">
+            {Object.entries(
+              filtered.reduce<Record<string, typeof filtered>>((acc, r) => {
+                const key = new Date(r.created_at).toLocaleDateString(undefined, {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })
+                acc[key] = acc[key] ? [...acc[key], r] : [r]
+                return acc
+              }, {}),
+            ).map(([label, items]) => (
+              <section key={label}>
+                <h4 className="text-xs font-bold tracking-[0.16em] uppercase text-slate-400 mb-3">{label}</h4>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {items.map((r) => <ReportCard key={r.id} report={r} />)}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </main>

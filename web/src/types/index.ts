@@ -19,18 +19,49 @@ export interface RadiologyReport {
   scan_image_name?: string | null
 }
 
+export type ReportKind = 'prompt' | 'structured'
+
+export interface ReportAlternative {
+  type: 'concise' | 'standard' | 'detailed'
+  word_limit: string
+  title: string
+  clinical_details: string
+  protocol: string
+  observations: string
+  impression: string
+  full_report: string
+}
+
+export interface PromptInputParams {
+  kind?: ReportKind
+  prompt?: string
+  report_format?: string
+  selected?: string
+  alternatives?: ReportAlternative[]
+}
+
 export interface ReportSummary {
   id: number
   patient_id: string
   patient_name: string
   modality: string
   status: 'draft' | 'final'
+  kind?: ReportKind
   created_at: string
   updated_at: string
-  report_data: RadiologyReport
-  input_params?: ReportInputParams | null
+  report_data: RadiologyReport | ReportAlternative
+  input_params?: (Partial<ReportInputParams> & PromptInputParams) | null
   scan_image?: string | null
   scan_image_name?: string | null
+}
+
+export interface PromptSession {
+  id: number
+  created_at: string
+  selected: string
+  reports: ReportAlternative[]
+  prompt: string
+  report_format?: string
 }
 
 export interface ReportInputParams {

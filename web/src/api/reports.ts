@@ -3,7 +3,9 @@ import type {
   AdminUser,
   DashboardStats,
   GenerateReportResponse,
+  PromptSession,
   RadiologyReport,
+  ReportAlternative,
   ReportInputParams,
   ReportSummary,
   StudyTemplate,
@@ -84,22 +86,33 @@ export async function generateReport(
   })
 }
 
-export interface ReportAlternative {
-  type: 'concise' | 'standard' | 'detailed'
-  word_limit: string
-  title: string
-  clinical_details: string
-  protocol: string
-  observations: string
-  impression: string
-  full_report: string
-}
-
-export async function generateAlternatives(prompt: string): Promise<{ reports: ReportAlternative[] }> {
+export async function generateAlternatives(
+  prompt: string,
+  reportFormat?: string,
+): Promise<PromptSession> {
   return apiFetch('/api/generate-alternatives', {
     method: 'POST',
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, report_format: reportFormat || '' }),
   })
+}
+
+export async function updatePromptDraft(
+  id: number,
+  body: { selected?: string; report?: ReportAlternative },
+): Promise<PromptSession> {
+  return apiFetch(`/api/reports/${id}/draft`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export async function downloadAlternativePdf(report: ReportAlternative): Promise<void> {
@@ -107,12 +120,15 @@ export async function downloadAlternativePdf(report: ReportAlternative): Promise
     method: 'POST',
     body: JSON.stringify(report),
   })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `radiology_report_${report.type}.pdf`
-  a.click()
-  URL.revokeObjectURL(url)
+  triggerDownload(blob, `radiology_report_${report.type}.pdf`)
+}
+
+export async function downloadAlternativeDocx(report: ReportAlternative): Promise<void> {
+  const blob = await apiFetchBlob('/api/alternative-docx', {
+    method: 'POST',
+    body: JSON.stringify(report),
+  })
+  triggerDownload(blob, `radiology_report_${report.type}.docx`)
 }
 
 export async function downloadReportPdf(report: RadiologyReport): Promise<void> {

@@ -3,6 +3,7 @@ groq
 python-dotenv
 pdfplumber
 reportlab
+python-docx
 uvicorn[standard]
 sqlalchemy
 psycopg2-binary

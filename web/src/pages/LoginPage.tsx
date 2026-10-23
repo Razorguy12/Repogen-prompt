@@ -22,7 +22,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard'
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/generate'
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -49,8 +49,8 @@ export default function LoginPage() {
       </header>
       <main className="flex-1 flex items-center justify-center px-4 sm:px-6 py-8 sm:py-12">
         <div className="glass-panel w-full max-w-md p-5 sm:p-8">
-          <h1 className="text-xl sm:text-2xl font-bold text-primary-dark mb-2 text-center">Sign In</h1>
-          <p className="text-sm text-slate-600 text-center mb-6 sm:mb-8">Access your radiology reporting portal</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-primary-dark mb-2 text-center">Sign in</h1>
+          <p className="text-sm text-slate-600 text-center mb-6 sm:mb-8">Open your report workspace</p>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             <div>

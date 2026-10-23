@@ -79,6 +79,26 @@ class GenerateReportResponse(BaseModel):
     id: int
     report: model.RadiologyReport
 
+def guess_modality(title: str) -> str:
+    text = (title or "").upper()
+    for token, label in (
+        ("MRI", "MRI"),
+        ("CT", "CT"),
+        ("X-RAY", "X-ray"),
+        ("XRAY", "X-ray"),
+        ("RADIOGRAPH", "X-ray"),
+        ("USG", "Ultrasound"),
+        ("ULTRASOUND", "Ultrasound"),
+        ("DOPPLER", "Doppler"),
+        ("MAMMO", "Mammography"),
+        ("PET", "PET"),
+        ("FLUORO", "Fluoroscopy"),
+    ):
+        if token in text:
+            return label
+    return "Imaging"
+
+
 def serialize_report(r: Report) -> dict:
     input_params = None
     if r.input_params:
@@ -86,16 +106,22 @@ def serialize_report(r: Report) -> dict:
             input_params = json.loads(r.input_params)
         except json.JSONDecodeError:
             pass
-    report_dict = json.loads(r.report_data)
+    report_dict = json.loads(r.report_data) if r.report_data else {}
     if getattr(r, "scan_image", None) and not report_dict.get("scan_image"):
         report_dict["scan_image"] = r.scan_image
         report_dict["scan_image_name"] = r.scan_image_name
+    kind = "prompt"
+    if isinstance(input_params, dict) and input_params.get("kind"):
+        kind = input_params["kind"]
+    elif report_dict.get("findings") is not None:
+        kind = "structured"
     return {
         "id": r.id,
         "patient_id": r.patient_id,
         "patient_name": r.patient_name,
         "modality": r.modality,
         "status": getattr(r, "status", None) or "draft",
+        "kind": kind,
         "created_at": r.created_at,
         "updated_at": getattr(r, "updated_at", None) or r.created_at,
         "report_data": report_dict,
@@ -235,15 +261,142 @@ async def generate_report(request: ReportRequest, current_user: User = Depends(a
 
 class PromptRequest(BaseModel):
     prompt: str
+    report_format: Optional[str] = None
 
-@app.post("/api/generate-alternatives", response_model=model.ReportAlternatives)
-async def generate_alternatives(request: PromptRequest, current_user: User = Depends(auth.get_current_user)):
+
+class PromptSessionResponse(BaseModel):
+    id: int
+    created_at: datetime.datetime
+    selected: str
+    reports: list[model.RadiologyReport]
+    prompt: str
+    report_format: Optional[str] = None
+
+
+class PromptSessionUpdate(BaseModel):
+    selected: Optional[str] = None
+    report: Optional[model.RadiologyReport] = None
+
+
+def persist_prompt_session(
+    db: Session,
+    user: User,
+    prompt: str,
+    report_format: Optional[str],
+    alternatives: model.ReportAlternatives,
+    selected: str = "standard",
+) -> Report:
+    chosen = next((r for r in alternatives.reports if r.type == selected), alternatives.reports[1])
+    now = datetime.datetime.utcnow()
+    stamp = now.strftime("%Y%m%d-%H%M%S")
+    input_params = json.dumps({
+        "kind": "prompt",
+        "prompt": prompt,
+        "report_format": report_format or "",
+        "selected": chosen.type,
+        "alternatives": [r.model_dump() for r in alternatives.reports],
+    })
+    db_report = Report(
+        user_id=user.id,
+        patient_id=f"R-{stamp}",
+        patient_name=chosen.title[:180],
+        modality=guess_modality(chosen.title),
+        status="draft",
+        created_at=now,
+        updated_at=now,
+        report_data=chosen.model_dump_json(),
+        input_params=input_params,
+    )
+    db.add(db_report)
+    db.commit()
+    db.refresh(db_report)
+    return db_report
+
+
+def session_payload(report: Report) -> dict:
+    params = {}
+    if report.input_params:
+        try:
+            params = json.loads(report.input_params)
+        except json.JSONDecodeError:
+            params = {}
+    alternatives = params.get("alternatives") or []
+    return {
+        "id": report.id,
+        "created_at": report.created_at,
+        "selected": params.get("selected") or "standard",
+        "reports": alternatives,
+        "prompt": params.get("prompt") or "",
+        "report_format": params.get("report_format") or "",
+    }
+
+
+@app.post("/api/generate-alternatives", response_model=PromptSessionResponse)
+async def generate_alternatives(
+    request: PromptRequest,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
     if not request.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is empty")
     try:
-        return model.generate_reports(request.prompt.strip())
+        alternatives = model.generate_reports(request.prompt.strip(), request.report_format)
+        saved = persist_prompt_session(
+            db, current_user, request.prompt.strip(), request.report_format, alternatives
+        )
+        return session_payload(saved)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
+
+
+@app.patch("/api/reports/{report_id}/draft")
+async def update_prompt_draft(
+    report_id: int,
+    body: PromptSessionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    report = get_report_or_404(report_id, db)
+    check_report_access(report, current_user)
+    if getattr(report, "status", "draft") == "final":
+        raise HTTPException(status_code=400, detail="Cannot edit a finalized report")
+
+    params = {}
+    if report.input_params:
+        try:
+            params = json.loads(report.input_params)
+        except json.JSONDecodeError:
+            params = {}
+    alternatives = params.get("alternatives") or []
+    selected = body.selected or params.get("selected") or "standard"
+
+    if body.report:
+        payload = body.report.model_dump()
+        alternatives = [
+            payload if item.get("type") == payload["type"] else item
+            for item in alternatives
+        ]
+        if payload["type"] == selected:
+            report.report_data = body.report.model_dump_json()
+            report.patient_name = body.report.title[:180]
+            report.modality = guess_modality(body.report.title)
+        selected = payload["type"]
+
+    chosen = next((item for item in alternatives if item.get("type") == selected), None)
+    if chosen and not body.report:
+        report.report_data = json.dumps(chosen)
+        report.patient_name = (chosen.get("title") or report.patient_name)[:180]
+        report.modality = guess_modality(chosen.get("title") or "")
+
+    params["selected"] = selected
+    params["alternatives"] = alternatives
+    params["kind"] = params.get("kind") or "prompt"
+    report.input_params = json.dumps(params)
+    report.updated_at = datetime.datetime.utcnow()
+    db.commit()
+    db.refresh(report)
+    return session_payload(report)
+
 
 @app.post("/api/alternative-pdf")
 async def alternative_pdf(report: model.RadiologyReport, current_user: User = Depends(auth.get_current_user)):
@@ -252,6 +405,20 @@ async def alternative_pdf(report: model.RadiologyReport, current_user: User = De
         return FileResponse(pdf_filename, media_type="application/pdf", filename=os.path.basename(pdf_filename))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create PDF: {str(e)}")
+
+
+@app.post("/api/alternative-docx")
+async def alternative_docx(report: model.RadiologyReport, current_user: User = Depends(auth.get_current_user)):
+    try:
+        filename = model.report_to_docx(report)
+        download_name = f"radiology_report_{report.type}.docx"
+        return FileResponse(
+            filename,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=download_name,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create Word document: {str(e)}")
 
 @app.post("/api/generate-report-pdf")
 async def generate_report_with_pdf(request: ReportRequest, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ReportSummary } from '../types'
+import type { RadiologyReport, ReportSummary } from '../types'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ScanModal } from './ScanModal'
@@ -8,11 +8,19 @@ interface ReportCardProps {
   report: ReportSummary
 }
 
+function isStructured(data: ReportSummary['report_data']): data is RadiologyReport {
+  return data != null && 'patient_name' in data
+}
+
 export function ReportCard({ report }: ReportCardProps) {
-  const date = new Date(report.created_at).toLocaleDateString()
+  const created = new Date(report.created_at)
+  const date = created.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  const time = created.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
   const [showScanModal, setShowScanModal] = useState(false)
-  const scanImg = report.scan_image || report.report_data?.scan_image
-  const scanImgName = report.scan_image_name || report.report_data?.scan_image_name
+  const structured = isStructured(report.report_data) ? report.report_data : null
+  const scanImg = report.scan_image || structured?.scan_image
+  const scanImgName = report.scan_image_name || structured?.scan_image_name
+  const href = report.kind === 'prompt' || report.input_params?.alternatives ? `/generate?id=${report.id}` : `/reports/${report.id}`
 
   return (
     <>
@@ -30,7 +38,7 @@ export function ReportCard({ report }: ReportCardProps) {
           <div>
             <div className="flex justify-between items-start gap-2 mb-2">
               <Link
-                to={`/reports/${report.id}`}
+                to={href}
                 className="text-base sm:text-lg font-semibold text-primary-dark no-underline hover:underline truncate"
               >
                 {report.patient_name}
@@ -49,7 +57,7 @@ export function ReportCard({ report }: ReportCardProps) {
               <span className="bg-primary/10 text-primary font-semibold px-2 py-0.5 rounded-full">
                 {report.modality}
               </span>
-              <span className="text-slate-500">{date}</span>
+              <span className="text-slate-500">{date} · {time}</span>
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -68,7 +76,7 @@ export function ReportCard({ report }: ReportCardProps) {
                 </button>
               )}
               <Link
-                to={`/reports/${report.id}`}
+                to={href}
                 className="px-2.5 py-1 rounded bg-primary text-white font-medium text-xs no-underline hover:bg-primary-light"
               >
                 Open →
