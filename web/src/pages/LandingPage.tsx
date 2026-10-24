@@ -12,7 +12,7 @@ const fadeUp = {
 const features = [
   {
     title: 'Chat-style drafting',
-    desc: 'Describe the study and lock a house format. RadAI returns three drafts you can choose from.',
+    desc: 'Describe the study and lock a house format. repogen returns three drafts you can choose from.',
     icon: '💬',
   },
   {
@@ -161,12 +161,12 @@ export default function LandingPage() {
         <motion.div {...fadeUp} className="max-w-xl mx-auto">
           <h2 className="text-2xl font-bold text-primary-dark mb-4">Ready to streamline your reporting?</h2>
           <p className="text-slate-600 mb-6">Sign in with your hospital credentials to start generating reports.</p>
-          <Link to="/login" className="btn btn-primary text-lg px-10 py-4">Sign In to RadAI Reports</Link>
+          <Link to="/login" className="btn btn-primary text-lg px-10 py-4">Sign In to repogen Reports</Link>
         </motion.div>
       </section>
 
       <footer className="px-6 py-6 text-center text-sm text-slate-500 border-t border-white/40">
-        RadAI Reports — Intelligent Radiology Reporting Portal
+        repogen Reports — Intelligent Radiology Reporting Portal
       </footer>
     </div>
   )

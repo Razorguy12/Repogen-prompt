@@ -1,4 +1,4 @@
-# RadAI Reports — Radiology Portal
+# repogen Reports — Radiology Portal
 
 A FastAPI + React portal for radiologists to generate AI-assisted structured reports, review and edit them, and export professional PDFs.
 

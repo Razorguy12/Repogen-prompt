@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 interface AppHeaderProps {
@@ -12,7 +12,7 @@ export function Logo() {
       <svg className="w-7 h-7 sm:w-8 sm:h-8 fill-primary shrink-0" viewBox="0 0 24 24">
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
       </svg>
-      <span className="text-lg sm:text-xl font-bold text-primary-dark tracking-tight">RadAI</span>
+      <span className="text-lg sm:text-xl font-bold text-primary-dark tracking-tight">repogen</span>
     </Link>
   )
 }
@@ -20,6 +20,7 @@ export function Logo() {
 export function AppHeader({ variant = 'default' }: AppHeaderProps) {
   const { token, name, isAdmin, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const handleLogout = () => {
@@ -52,8 +53,8 @@ export function AppHeader({ variant = 'default' }: AppHeaderProps) {
         <nav className="hidden md:flex items-center gap-2.5">
           {token && (
             <>
-              <Link to="/dashboard" className="btn btn-secondary text-xs sm:text-sm py-1.5 px-3.5">
-                Dashboard
+              <Link to={location.pathname === '/dashboard' ? '/generate' : '/dashboard'} className="btn btn-secondary text-xs sm:text-sm py-1.5 px-3.5">
+                {location.pathname === '/dashboard' ? 'Back to Chat' : 'Dashboard'}
               </Link>
               <Link to="/generate" className="btn btn-primary text-xs sm:text-sm py-1.5 px-3.5">
                 + New Report
@@ -106,11 +107,11 @@ export function AppHeader({ variant = 'default' }: AppHeaderProps) {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <Link
-                  to="/dashboard"
+                  to={location.pathname === '/dashboard' ? '/generate' : '/dashboard'}
                   onClick={() => setMobileMenuOpen(false)}
                   className="btn btn-secondary text-xs py-2 px-3 text-center"
                 >
-                  📊 Dashboard
+                  {location.pathname === '/dashboard' ? '← Back to Chat' : '📊 Dashboard'}
                 </Link>
                 <Link
                   to="/generate"

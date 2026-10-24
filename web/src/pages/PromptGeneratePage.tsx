@@ -231,8 +231,25 @@ export default function PromptGeneratePage() {
   }
 
   const copyReport = async (r: ReportAlternative) => {
-    await navigator.clipboard.writeText(r.full_report)
-    toast.success('Copied to clipboard')
+    try {
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(r.full_report)
+      } else {
+        const copyArea = document.createElement('textarea')
+        copyArea.value = r.full_report
+        copyArea.setAttribute('readonly', '')
+        copyArea.style.position = 'fixed'
+        copyArea.style.opacity = '0'
+        document.body.appendChild(copyArea)
+        copyArea.select()
+        const copied = document.execCommand('copy')
+        copyArea.remove()
+        if (!copied) throw new Error('Clipboard access is unavailable')
+      }
+      toast.success('Copied to clipboard')
+    } catch {
+      toast.error('Could not copy report. Check clipboard permissions and try again.')
+    }
   }
 
   const finalize = async () => {
@@ -250,7 +267,7 @@ export default function PromptGeneratePage() {
     <div className="studio">
       <aside className={`studio-sidebar ${sidebarOpen ? 'is-open' : ''}`}>
         <div className="sidebar-brand">
-          <Link to="/dashboard" className="brand-mark">RadAI</Link>
+          <Link to="/dashboard" className="brand-mark">repogen</Link>
           <button type="button" className="ghost-btn" onClick={startNew}>New chat</button>
         </div>
         <div className="sidebar-scroll">
@@ -313,7 +330,7 @@ export default function PromptGeneratePage() {
               <p className="eyebrow">Doctor-in-the-loop drafting</p>
               <h2>What should this report say?</h2>
               <p>
-                Dictate or type the findings, optionally lock a house format, and RadAI will return three drafts
+                Dictate or type the findings, optionally lock a house format, and repogen will return three drafts
                 you can choose from, edit in Word, and keep on file by date.
               </p>
               <div className="example-grid">
@@ -347,7 +364,7 @@ export default function PromptGeneratePage() {
               </article>
 
               <article className="bubble assistant">
-                <div className="bubble-meta">RadAI · three drafts</div>
+                <div className="bubble-meta">repogen · three drafts</div>
                 <div className="variant-tabs" role="tablist">
                   {session.reports.map((r, i) => (
                     <button

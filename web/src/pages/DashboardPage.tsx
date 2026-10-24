@@ -11,7 +11,6 @@ export default function DashboardPage() {
   const { name, token } = useAuth()
   const [search, setSearch] = useState('')
   const [modalityFilter, setModalityFilter] = useState<string | null>(null)
-  const [sortBy, setSortBy] = useState<'date' | 'modality'>('date')
 
   const { data: reports = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ['reports', token],
@@ -33,22 +32,20 @@ export default function DashboardPage() {
   const filtered = useMemo(() => {
     let result = reports.filter((r) => {
       const term = search.toLowerCase()
-      const patientId = (r.patient_id ?? '').toLowerCase()
-      const patientName = (r.patient_name ?? '').toLowerCase()
-      const matchesSearch = !term || patientId.includes(term) || patientName.includes(term)
+      const modality = (r.modality ?? '').toLowerCase()
+      const date = new Date(r.created_at)
+      const dateText = [
+        r.created_at,
+        date.toLocaleDateString(),
+        date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }),
+      ].join(' ').toLowerCase()
+      const matchesSearch = !term || modality.includes(term) || dateText.includes(term)
       const matchesModality = !modalityFilter || r.modality === modalityFilter
       return matchesSearch && matchesModality
     })
 
-    if (sortBy === 'date') {
-      result = [...result].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      )
-    } else {
-      result = [...result].sort((a, b) => a.modality.localeCompare(b.modality))
-    }
     return result
-  }, [reports, search, modalityFilter, sortBy])
+  }, [reports, search, modalityFilter])
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -81,18 +78,10 @@ export default function DashboardPage() {
           <input
             type="text"
             className="form-control w-full sm:max-w-sm"
-            placeholder="Search by Patient ID or name..."
+            placeholder="Search by date or study type..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <select
-            className="form-control w-full sm:max-w-[160px]"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'date' | 'modality')}
-          >
-            <option value="date">Sort by Date</option>
-            <option value="modality">Sort by Modality</option>
-          </select>
         </div>
 
         {modalities.length > 0 && (
