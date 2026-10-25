@@ -1,125 +1,159 @@
-# repogen Reports — Radiology Portal
+# repogen Reports
 
-A FastAPI + React portal for radiologists to generate AI-assisted structured reports, review and edit them, and export professional PDFs.
+### A focused workspace for drafting radiology reports from natural-language prompts
+
+Describe the examination, clinical context, and findings in your own words. repogen creates three structured draft options, then gives you a place to review, refine, export, and find each case again.
+
+> **For qualified radiologists:** AI-generated reports are drafts. Verify every statement against the study and clinical record before approving or using a report.
+
+---
+
+## At a glance
+
+- **Prompt-first workflow:** Type or dictate a case instead of completing a multi-step form.
+- **Three versions per case:** Compare concise, standard, and detailed drafts built from the same supplied facts.
+- **Your report style:** Optionally provide a house format or choose a preset for headings and order.
+- **Review and edit:** Preview, select, edit, save, or copy the version that fits the case.
+- **Export when ready:** Download a polished PDF or a Word document for further editing.
+- **A timestamped library:** Reopen prompt sessions from recent history or find reports in the dashboard.
+- **Secure workspace:** Sign-in, account-scoped reports, and role-restricted administration.
+
+## How prompt-based drafting works
+
+1. **Describe the case.** Include the modality and body region, relevant clinical details, and the findings you want reported. The prompt can be up to 8,000 characters.
+2. **Add a format if you need one.** Use the Classic, Numbered Impression, or Organ-wise preset, or enter your preferred headings and order. This step is optional.
+3. **Generate three drafts.** repogen returns concise (80–120 words), standard (150–200 words), and detailed (200–280 words) alternatives. Each version is intended to preserve the same case facts while varying its level of detail.
+4. **Choose and refine.** Switch between versions, edit the report in the workspace, save your edits, or copy the text.
+5. **Export or return later.** Download the selected report as PDF or DOCX. Generated prompt sessions are saved with their timestamp and can be reopened from history or the Library dashboard.
+
+### What you can include in a prompt
+
+Give the model the information needed to draft the report, such as:
+
+- Examination and modality (for example, MRI lumbar spine or chest radiograph)
+- Clinical indication and relevant history
+- Findings, measurements, and locations
+- Any requested report style, headings, or impression format
+
+Example:
+
+```text
+MRI lumbar spine. Low back pain radiating to the left leg. L4-L5 disc bulge
+contacts the left traversing nerve root. Use headings for Examination,
+Technique, Findings by level, and a numbered Impression.
+```
+
+The workspace includes starter prompts for CT brain, MRI lumbar spine, chest X-ray, and abdominal ultrasound. These are examples; the drafting prompt is designed for a broad range of imaging examinations.
 
 ## Features
 
-- **React SPA** — Landing page, doctor dashboard, multi-step report wizard, preview/edit, admin panel
-- **AI Report Generation** — Groq LLM produces structured findings, impressions, and recommendations
-- **Doctor-in-the-Loop** — Edit reports inline, save to database, mark as draft or final
-- **Voice Dictation & PDF Uploads** — Dictate clinical impressions directly via microphone (transcribed in real-time via Groq Whisper) or upload patient history PDFs to extract findings automatically
-- **Standalone Medical Scan Viewer** — Attach study scans (CT, MRI, X-ray); view scans alone in an interactive darkroom viewer with film negative inversion mode (`Invert (Film)`) and zoom controls without cluttering the written report
-- **Clean Unicode PDF Export** — High-resolution ReportLab PDF generation with TrueType Unicode font support (`LiberationSans`) and text sanitization (no missing glyphs or black blocks)
-- **Mobile-Responsive UI** — Fully responsive mobile design with natural non-sticky scrolling navigation and responsive drawer menu
-- **Modality Templates** — Quick-start templates for CT Chest, MRI Brain, Ultrasound, and more
-- **JWT Auth** — Secure login with role-based admin user management
+| Feature | What it does |
+| --- | --- |
+| **Natural-language composer** | Enter the study, context, and findings in one prompt. Generate with the button or `Ctrl+Enter` (`⌘+Enter` on Mac). |
+| **Voice dictation** | Dictate into the prompt using your microphone; recognized speech is added to the composer. |
+| **Custom formats and presets** | Add a preferred layout, or start from Classic, Numbered Impression, and Organ-wise formats. |
+| **Three report lengths** | Compare concise, standard, and detailed alternatives for the same case. |
+| **Draft selection** | Select the preferred alternative; the choice is saved with the session. |
+| **Inline editing** | Edit the report text and save it back to the selected draft. |
+| **Copy and export** | Copy report text, download a PDF, or download a DOCX to continue editing in Word-compatible software. |
+| **Recent report history** | Open the seven most recent prompt reports from the workspace sidebar; use the Library link for the full dashboard. |
+| **Report library** | Browse reports by date, search by date or study type, filter by modality, and view account report statistics. |
+| **Draft and final status** | Mark a report final after review. Finalized reports are protected from editing in the standard report workflow. |
+| **Structured report workflow** | An additional, separate wizard is available at `/generate-structured` for template-driven generation, PDF text extraction, voice tools, and scan attachments. |
+| **Administration** | Admin users can manage accounts from the protected admin area. |
 
-## Setup
+## Getting started
 
-### 1. Backend
+### Requirements
+
+- Python 3.10 or newer
+- Node.js and npm
+- A Groq API key for report generation and voice transcription
+
+### Configure the backend
+
+From the repository root:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
-cp .env.example .env
-# Edit .env and add GROQ_API_KEY (and optionally DATABASE_URL, SECRET_KEY)
+cp .env.example .env            # Windows: copy .env.example .env
 ```
 
-### 2. Frontend
+Edit `.env` and set `GROQ_API_KEY`. Configure `DATABASE_URL` and `SECRET_KEY` as appropriate for your deployment. SQLite is used when no database URL is provided.
+
+### Install and run the frontend
 
 ```bash
 cd web
 npm install
-npm run build   # production build → web/dist/
+npm run dev
 ```
 
-### 3. Run
-
-**Development** (recommended — hot reload for frontend):
+In another terminal, from the repository root, start the API:
 
 ```bash
-# Terminal 1 — API
 python -m uvicorn main:app --reload
-
-# Terminal 2 — React dev server (proxies /api to :8000)
-cd web && npm run dev
 ```
 
-Open `http://localhost:5173`
+Open the Vite URL printed by the frontend command (usually `http://localhost:5173`). The Vite development server proxies API requests to the backend on port 8000.
 
-**Production** (single server serves API + built SPA):
+### Production build
 
 ```bash
-cd web && npm run build
+cd web
+npm install
+npm run build
+cd ..
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Open `http://localhost:8000`
+Open `http://localhost:8000`. FastAPI serves the built frontend. API documentation is available at `/docs`.
 
-API docs: `http://localhost:8000/docs`
+## Main pages
 
-## Project Structure
+| Path | Purpose |
+| --- | --- |
+| `/` | Product introduction and workflow overview |
+| `/login` | Sign in |
+| `/generate` | Prompt-based drafting workspace |
+| `/dashboard` | Report library, search, modality filters, and report statistics |
+| `/generate-structured` | Template-driven structured report wizard |
+| `/reports/:id` | Structured report preview and editing |
+| `/admin` | User administration for authorized admins |
 
-```
-radiology/
-├── main.py              # FastAPI app, API routes, static SPA serving
-├── auth.py              # JWT + bcrypt authentication
-├── database.py          # SQLAlchemy User/Report models & migrations
-├── model/
-│   ├── model.py         # Pydantic schemas, Groq LLM integration, ReportLab PDF generator
-│   └── templates.json   # Modality study templates
-├── web/                 # Modern React + Vite frontend
-│   ├── src/
-│   │   ├── pages/       # Landing, Login, Dashboard, Generate, ReportPreview, Admin
-│   │   ├── components/  # AppHeader, ScanModal, AudioPdfControls, ReportCard, LoadingOverlay
-│   │   ├── api/         # Axios API clients
-│   │   └── context/     # AuthContext
-│   └── dist/            # Production build output
-└── frontend/legacy/     # Archived vanilla HTML (pre-React)
-```
-
-## Routes
-
-| Route | Description |
-|-------|-------------|
-| `/` | Public landing page |
-| `/login` | Doctor sign-in |
-| `/dashboard` | Report history, stats, search/filter, and quick scan view |
-| `/generate` | Prompt-based report drafting from a natural-language radiologist note |
-| `/generate-structured` | Original 4-step wizard with templates, voice dictation, PDF extract, and scan attachment |
-| `/reports/:id` | Preview, edit, save, finalize, download PDF, and view scan alone |
-| `/admin` | User management (admin only) |
-
-## API Endpoints
-
-| Method | Path | Auth | Purpose |
-|--------|------|------|---------|
-| POST | `/api/token` | Public | Login & JWT generation |
-| GET | `/api/reports` | User | List own reports |
-| GET | `/api/reports/{id}` | User | Get single report with scan data |
-| PATCH | `/api/reports/{id}` | User | Save edited report |
-| PATCH | `/api/reports/{id}/status` | User | Set draft/final |
-| POST | `/api/generate-report` | User | Generate + save report |
-| POST | `/api/create-pdf-from-report` | User | Download clean formatted PDF |
-| POST | `/api/extract-text-from-pdf` | User | Extract text from uploaded clinical PDF |
-| POST | `/api/transcribe-audio` | User | Transcribe voice dictation audio via Groq Whisper |
-| GET | `/api/templates` | User | Modality templates |
-| GET | `/api/dashboard/stats` | User | Dashboard statistics |
-| GET/POST | `/api/users` | Admin | List/create users |
-
-## Environment Variables
+## Configuration
 
 | Variable | Required | Description |
-|----------|----------|-------------|
-| `GROQ_API_KEY` | Yes | Groq API key for LLM and Whisper transcription |
-| `DATABASE_URL` | No | PostgreSQL URL (falls back to SQLite) |
-| `SECRET_KEY` | No | JWT secret (change in production) |
+| --- | --- | --- |
+| `GROQ_API_KEY` | Yes for AI generation and transcription | API key used by Groq-backed report generation and Whisper transcription. |
+| `DATABASE_URL` | No | SQLAlchemy database URL. The app falls back to SQLite when omitted. |
+| `SECRET_KEY` | Recommended | Secret used for signing authentication tokens. Set a private value in deployed environments. |
 
-## Notes
+See `.env.example` for the configuration template.
 
-- Reports have `draft` or `final` status; finalized reports cannot be edited.
-- Attached scan images remain independent of the clinical text report and can be viewed on demand in the standalone viewer modal.
-- Edits are persisted to the database.
-- Default admin user is seeded on first startup (see `main.py`).
+## Project layout
+
+```text
+.
+├── main.py                  # FastAPI routes and application setup
+├── auth.py                  # Authentication helpers
+├── database.py              # Database models and setup
+├── model/
+│   ├── model.py             # Report generation and document export
+│   ├── system_prompt.txt    # Drafting instructions
+│   └── templates.json      # Structured workflow templates
+└── web/
+    └── src/
+        ├── pages/           # Landing, prompt workspace, library, and other pages
+        ├── components/      # Dictation, report cards, scan tools, and shared UI
+        └── api/              # Frontend API client
+```
+
+## Clinical review
+
+repogen assists with drafting and organization. It does not replace image interpretation, clinical judgment, or verification by a qualified radiologist. Confirm findings, measurements, protocol details, and recommendations against the source study before marking a report final or using it for patient care.
 
 ## License
 
