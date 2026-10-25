@@ -123,7 +123,9 @@ export default function PromptGeneratePage() {
 
   const groupedHistory = useMemo(() => {
     const groups: { label: string; items: ReportSummary[] }[] = []
-    for (const item of history) {
+    // Keep the sidebar compact so the report composer and account controls stay
+    // visible without requiring the user to scroll the history panel.
+    for (const item of history.slice(0, 7)) {
       const label = dateGroupLabel(item.created_at)
       const last = groups[groups.length - 1]
       if (last && last.label === label) last.items.push(item)
@@ -295,6 +297,11 @@ export default function PromptGeneratePage() {
               ))}
             </section>
           ))}
+          {history.length > 7 && (
+            <Link to="/dashboard" className="history-library-link" onClick={() => setSidebarOpen(false)}>
+              View all reports in Library
+            </Link>
+          )}
         </div>
         <div className="sidebar-user">
           <div>
