@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { AppHeader } from '../components/AppHeader'
 import { ReportCard } from '../components/ReportCard'
 import { useAuth } from '../context/AuthContext'
-import { getUsers, createUser, getUserReports, getReports } from '../api/reports'
+import { getUsers, createUser, getUserReports, getReports, updateUserPassword, deleteDoctor } from '../api/reports'
 import type { AdminUser } from '../types'
 import { ApiError } from '../api/client'
 
@@ -16,6 +16,9 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState('')
   const [reportSearch, setReportSearch] = useState('')
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null)
+  const [passwordUser, setPasswordUser] = useState<number | null>(null)
+  const [newPassword, setNewPassword] = useState('')
+  const [isSavingPassword, setIsSavingPassword] = useState(false)
 
   const [form, setForm] = useState({
     name: '',
@@ -73,6 +76,33 @@ export default function AdminPage() {
       toast.error(err instanceof ApiError ? err.message : 'Failed to create user')
     } finally {
       setIsCreating(false)
+    }
+  }
+
+  const handlePasswordChange = async (e: React.FormEvent, user: AdminUser) => {
+    e.preventDefault()
+    setIsSavingPassword(true)
+    try {
+      await updateUserPassword(user.id, newPassword)
+      toast.success(`Password updated for ${user.name}`)
+      setPasswordUser(null)
+      setNewPassword('')
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Failed to update password')
+    } finally {
+      setIsSavingPassword(false)
+    }
+  }
+
+  const handleDeleteDoctor = async (user: AdminUser) => {
+    if (!window.confirm(`Delete Dr. ${user.name} and all of their reports? This cannot be undone.`)) return
+    try {
+      await deleteDoctor(user.id)
+      toast.success('Doctor and their reports deleted')
+      if (selectedUser?.id === user.id) setSelectedUser(null)
+      await refetchUsers()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Failed to delete doctor')
     }
   }
 
@@ -152,24 +182,66 @@ export default function AdminPage() {
                       <th className="p-3 font-semibold text-primary-dark">Username</th>
                       <th className="p-3 font-semibold text-primary-dark">Email</th>
                       <th className="p-3 font-semibold text-primary-dark">Role</th>
+                      <th className="p-3 font-semibold text-primary-dark">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredUsers.map((u) => (
                       <tr
                         key={u.id}
-                        onClick={() => setSelectedUser(u)}
                         className="border-b border-slate-200 cursor-pointer hover:bg-primary/5 transition-colors"
                       >
-                        <td className="p-3">{u.name}</td>
-                        <td className="p-3">{u.username}</td>
-                        <td className="p-3">{u.email}</td>
-                        <td className="p-3">{u.is_admin ? 'Admin' : 'Doctor'}</td>
+                        <td className="p-3" onClick={() => setSelectedUser(u)}>{u.name}</td>
+                        <td className="p-3" onClick={() => setSelectedUser(u)}>{u.username}</td>
+                        <td className="p-3" onClick={() => setSelectedUser(u)}>{u.email}</td>
+                        <td className="p-3" onClick={() => setSelectedUser(u)}>{u.is_admin ? 'Admin' : 'Doctor'}</td>
+                        <td className="p-3 whitespace-nowrap">
+                          <button
+                            type="button"
+                            className="btn btn-secondary text-sm py-1 px-3"
+                            onClick={() => { setPasswordUser(passwordUser === u.id ? null : u.id); setNewPassword('') }}
+                          >
+                            Change password
+                          </button>
+                          {!u.is_admin && (
+                            <button
+                              type="button"
+                              className="ml-2 text-sm text-red-600 hover:text-red-800 bg-transparent border-0 cursor-pointer"
+                              onClick={() => handleDeleteDoctor(u)}
+                            >
+                              Delete doctor
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              {passwordUser !== null && (() => {
+                const user = users.find((u) => u.id === passwordUser)
+                if (!user) return null
+                return (
+                  <form onSubmit={(e) => handlePasswordChange(e, user)} className="mt-5 p-4 rounded-lg bg-primary/5 flex flex-wrap items-end gap-3">
+                    <div className="flex-1 min-w-56">
+                      <label className="form-label">New password for {user.name}</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        minLength={8}
+                        required
+                        autoComplete="new-password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                      />
+                    </div>
+                    <button type="submit" disabled={isSavingPassword} className="btn btn-primary">
+                      {isSavingPassword ? 'Saving...' : 'Save password'}
+                    </button>
+                    <button type="button" onClick={() => setPasswordUser(null)} className="btn btn-secondary">Cancel</button>
+                  </form>
+                )
+              })()}
             </div>
           </div>
         )}

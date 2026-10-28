@@ -169,6 +169,17 @@ export async function createUser(data: {
   })
 }
 
+export async function updateUserPassword(userId: number, password: string): Promise<{ msg: string }> {
+  return apiFetch(`/api/admin/users/${userId}/password`, {
+    method: 'PATCH',
+    body: JSON.stringify({ password }),
+  })
+}
+
+export async function deleteDoctor(userId: number): Promise<{ msg: string }> {
+  return apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
+}
+
 export async function getUserReports(userId: number): Promise<ReportSummary[]> {
   return apiFetch<ReportSummary[]>(`/api/admin/users/${userId}/reports`)
 }

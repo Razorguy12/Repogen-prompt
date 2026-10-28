@@ -69,6 +69,9 @@ class UserCreate(BaseModel):
     password: str
     is_admin: bool = False
 
+class PasswordUpdate(BaseModel):
+    password: str
+
 class ReportUpdate(BaseModel):
     report_data: model.RadiologyReport
 
@@ -172,6 +175,29 @@ async def create_user(user: UserCreate, db: Session = Depends(get_db), current_a
 async def list_users(db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
     users = db.query(User).all()
     return [{"id": u.id, "name": u.name, "username": u.username, "email": u.email, "is_admin": u.is_admin} for u in users]
+
+@app.patch("/api/admin/users/{user_id}/password")
+async def update_user_password(user_id: int, request: PasswordUpdate, db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
+    if len(request.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.hashed_password = auth.get_password_hash(request.password)
+    db.commit()
+    return {"msg": "Password updated successfully"}
+
+@app.delete("/api/admin/users/{user_id}")
+async def delete_doctor(user_id: int, db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.is_admin:
+        raise HTTPException(status_code=400, detail="Admin accounts cannot be deleted here")
+    db.query(Report).filter(Report.user_id == user_id).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
+    return {"msg": "Doctor deleted successfully"}
 
 @app.get("/api/")
 async def root():
