@@ -1,4 +1,4 @@
-# repogen Reports
+# Repogen Reports
 
 ### A focused workspace for drafting radiology reports from natural-language prompts
 
