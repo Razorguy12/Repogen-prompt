@@ -43,6 +43,9 @@ def startup():
         )
         db.add(new_admin)
         db.commit()
+    elif not admin.is_admin:
+        admin.is_admin = True
+        db.commit()
 
 # Add CORS middleware
 app.add_middleware(
@@ -192,12 +195,15 @@ async def delete_doctor(user_id: int, db: Session = Depends(get_db), current_adm
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if user.is_admin:
-        raise HTTPException(status_code=400, detail="Admin accounts cannot be deleted here")
+    is_root_admin = current_admin.username == "azharsait2006"
+    if user.username == "azharsait2006":
+        raise HTTPException(status_code=400, detail="The root admin account cannot be deleted")
+    if user.is_admin and not is_root_admin:
+        raise HTTPException(status_code=403, detail="Only the root admin can delete admin accounts")
     db.query(Report).filter(Report.user_id == user_id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
-    return {"msg": "Doctor deleted successfully"}
+    return {"msg": "Admin deleted successfully" if user.is_admin else "Doctor deleted successfully"}
 
 @app.get("/api/")
 async def root():

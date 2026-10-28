@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { AppHeader } from '../components/AppHeader'
 import { ReportCard } from '../components/ReportCard'
 import { useAuth } from '../context/AuthContext'
-import { getUsers, createUser, getUserReports, getReports, updateUserPassword, deleteDoctor } from '../api/reports'
+import { getUsers, getMe, createUser, getUserReports, getReports, updateUserPassword, deleteDoctor } from '../api/reports'
 import type { AdminUser } from '../types'
 import { ApiError } from '../api/client'
 
@@ -33,6 +33,8 @@ export default function AdminPage() {
     queryKey: ['users'],
     queryFn: getUsers,
   })
+  const { data: currentProfile } = useQuery({ queryKey: ['me'], queryFn: getMe })
+  const isRootAdmin = currentProfile?.username === 'azharsait2006'
 
   const { data: myReports = [] } = useQuery({
     queryKey: ['reports'],
@@ -95,10 +97,10 @@ export default function AdminPage() {
   }
 
   const handleDeleteDoctor = async (user: AdminUser) => {
-    if (!window.confirm(`Delete Dr. ${user.name} and all of their reports? This cannot be undone.`)) return
+    if (!window.confirm(`Delete ${user.is_admin ? 'admin' : 'doctor'} ${user.name} and all of their reports? This cannot be undone.`)) return
     try {
       await deleteDoctor(user.id)
-      toast.success('Doctor and their reports deleted')
+      toast.success(`${user.is_admin ? 'Admin' : 'Doctor'} and their reports deleted`)
       if (selectedUser?.id === user.id) setSelectedUser(null)
       await refetchUsers()
     } catch (err) {
@@ -109,19 +111,19 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <AppHeader />
-      <main className="flex-1 max-w-6xl mx-auto w-full px-6 py-8">
-        <h1 className="text-3xl font-bold text-primary-dark mb-1">
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-5 sm:py-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-primary-dark mb-1">
           Admin Dashboard
           <span className="ml-2 text-xs text-red-500 border border-red-500 px-2 py-0.5 rounded align-middle">ADMIN</span>
         </h1>
         <p className="text-primary font-medium mb-6">Logged in as {name}</p>
 
-        <div className="flex gap-4 border-b border-slate-200 mb-8">
+        <div className="flex gap-2 sm:gap-4 border-b border-slate-200 mb-6 sm:mb-8 overflow-x-auto">
           {(['users', 'my-reports'] as const).map((t) => (
             <button
               key={t}
               onClick={() => { setTab(t); setSelectedUser(null) }}
-              className={`pb-2 px-4 font-semibold cursor-pointer bg-transparent border-none border-b-2 transition-colors ${
+              className={`pb-2 px-3 sm:px-4 whitespace-nowrap text-sm sm:text-base font-semibold cursor-pointer bg-transparent border-none border-b-2 transition-colors ${
                 tab === t
                   ? 'text-primary border-primary'
                   : 'text-slate-400 border-transparent hover:text-slate-600'
@@ -133,8 +135,8 @@ export default function AdminPage() {
         </div>
 
         {tab === 'users' && !selectedUser && (
-          <div className="grid lg:grid-cols-[1fr_2fr] gap-8">
-            <div className="glass-panel p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(18rem,0.85fr)_minmax(0,1.65fr)] gap-5 lg:gap-7 items-start">
+            <div className="glass-panel p-4 sm:p-6 min-w-0">
               <h2 className="text-xl font-bold text-primary-dark mb-4">Add New Doctor</h2>
               <form onSubmit={handleCreateUser} className="space-y-4">
                 <div>
@@ -163,8 +165,8 @@ export default function AdminPage() {
               </form>
             </div>
 
-            <div className="glass-panel p-6">
-              <div className="flex justify-between items-center mb-4">
+            <div className="glass-panel p-4 sm:p-6 min-w-0">
+              <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
                 <h2 className="text-xl font-bold text-primary-dark m-0">Registered Users</h2>
                 <button onClick={() => refetchUsers()} className="btn btn-secondary text-sm py-2 px-4">Refresh</button>
               </div>
@@ -174,8 +176,8 @@ export default function AdminPage() {
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
               />
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
+              <div className="overflow-x-auto -mx-1">
+                <table className="w-full min-w-[760px] text-left border-collapse">
                   <thead>
                     <tr className="bg-primary/5">
                       <th className="p-3 font-semibold text-primary-dark">Name</th>
@@ -203,13 +205,13 @@ export default function AdminPage() {
                           >
                             Change password
                           </button>
-                          {!u.is_admin && (
+                          {(!u.is_admin || isRootAdmin) && u.username !== 'azharsait2006' && (
                             <button
                               type="button"
                               className="ml-2 text-sm text-red-600 hover:text-red-800 bg-transparent border-0 cursor-pointer"
                               onClick={() => handleDeleteDoctor(u)}
                             >
-                              Delete doctor
+                              {u.is_admin ? 'Delete admin' : 'Delete doctor'}
                             </button>
                           )}
                         </td>
@@ -248,8 +250,8 @@ export default function AdminPage() {
 
         {(selectedUser || tab === 'my-reports') && (
           <div>
-            <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
-              <h2 className="text-xl font-bold text-primary-dark m-0">
+            <div className="flex flex-wrap justify-between items-center gap-3 mb-5 sm:mb-6">
+              <h2 className="text-lg sm:text-xl font-bold text-primary-dark m-0">
                 {selectedUser ? `Reports for ${selectedUser.name}` : 'My Reports'}
               </h2>
               {selectedUser && (
@@ -259,7 +261,7 @@ export default function AdminPage() {
               )}
             </div>
             <input
-              className="form-control max-w-sm mb-6"
+              className="form-control w-full sm:max-w-sm mb-5 sm:mb-6"
               placeholder="Search by Patient ID or name..."
               value={reportSearch}
               onChange={(e) => setReportSearch(e.target.value)}
