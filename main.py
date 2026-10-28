@@ -75,6 +75,9 @@ class UserCreate(BaseModel):
 class PasswordUpdate(BaseModel):
     password: str
 
+class UserLockUpdate(BaseModel):
+    locked: bool
+
 class ReportUpdate(BaseModel):
     report_data: model.RadiologyReport
 
@@ -136,6 +139,31 @@ def serialize_report(r: Report) -> dict:
         "scan_image_name": getattr(r, "scan_image_name", None),
     }
 
+
+REPORTS_PER_UNLOCK = 10
+
+def report_count_for_user(db: Session, user_id: int) -> int:
+    return db.query(func.count(Report.id)).filter(Report.user_id == user_id).scalar() or 0
+
+def ensure_user_can_generate(db: Session, user: User) -> int:
+    count = report_count_for_user(db, user.id)
+    if user.is_admin:
+        return count
+    if user.is_locked:
+        raise HTTPException(status_code=403, detail="Your account is locked. Please contact an administrator.")
+    if count - user.report_quota_start >= REPORTS_PER_UNLOCK:
+        user.is_locked = True
+        db.commit()
+        raise HTTPException(status_code=403, detail="You have reached the 10-report limit. Please contact an administrator to unlock your account.")
+    return count
+
+def update_automatic_lock(db: Session, user: User):
+    if user.is_admin:
+        return
+    # Sessions disable autoflush, so include the pending report in this check.
+    if report_count_for_user(db, user.id) + 1 - user.report_quota_start >= REPORTS_PER_UNLOCK:
+        user.is_locked = True
+
 def get_report_or_404(report_id: int, db: Session) -> Report:
     report = db.query(Report).filter(Report.id == report_id).first()
     if not report:
@@ -177,7 +205,45 @@ async def create_user(user: UserCreate, db: Session = Depends(get_db), current_a
 @app.get("/api/users")
 async def list_users(db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
     users = db.query(User).all()
-    return [{"id": u.id, "name": u.name, "username": u.username, "email": u.email, "is_admin": u.is_admin} for u in users]
+    listed_users = []
+    lock_state_changed = False
+    for user in users:
+        report_count = report_count_for_user(db, user.id)
+        if user.is_admin and user.is_locked:
+            user.is_locked = False
+            lock_state_changed = True
+        if not user.is_admin and report_count - user.report_quota_start >= REPORTS_PER_UNLOCK and not user.is_locked:
+            user.is_locked = True
+            lock_state_changed = True
+        listed_users.append({
+            "id": user.id,
+            "name": user.name,
+            "username": user.username,
+            "email": user.email,
+            "is_admin": user.is_admin,
+            "is_locked": user.is_locked,
+            "report_count": report_count,
+        })
+    if lock_state_changed:
+        db.commit()
+    return listed_users
+
+@app.patch("/api/admin/users/{user_id}/lock")
+async def update_user_lock(user_id: int, request: UserLockUpdate, db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.is_admin:
+        raise HTTPException(status_code=400, detail="Admin accounts cannot be locked")
+    user.is_locked = request.locked
+    if not request.locked:
+        user.report_quota_start = report_count_for_user(db, user.id)
+    db.commit()
+    return {
+        "msg": "User locked" if request.locked else "User unlocked",
+        "is_locked": user.is_locked,
+        "report_count": report_count_for_user(db, user.id),
+    }
 
 @app.patch("/api/admin/users/{user_id}/password")
 async def update_user_password(user_id: int, request: PasswordUpdate, db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
@@ -245,6 +311,7 @@ async def dashboard_stats(db: Session = Depends(get_db), current_user: User = De
 
 @app.post("/api/generate-report", response_model=GenerateReportResponse)
 async def generate_report(request: ReportRequest, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    ensure_user_can_generate(db, current_user)
     try:
         combined_input = f"""
         Patient Information: {request.patient_info}
@@ -283,6 +350,7 @@ async def generate_report(request: ReportRequest, current_user: User = Depends(a
             scan_image_name=request.scan_image_name,
         )
         db.add(db_report)
+        update_automatic_lock(db, current_user)
         db.commit()
         db.refresh(db_report)
 
@@ -318,6 +386,7 @@ def persist_prompt_session(
     alternatives: model.ReportAlternatives,
     selected: str = "standard",
 ) -> Report:
+    ensure_user_can_generate(db, user)
     chosen = next((r for r in alternatives.reports if r.type == selected), alternatives.reports[1])
     now = datetime.datetime.utcnow()
     stamp = now.strftime("%Y%m%d-%H%M%S")
@@ -340,6 +409,7 @@ def persist_prompt_session(
         input_params=input_params,
     )
     db.add(db_report)
+    update_automatic_lock(db, user)
     db.commit()
     db.refresh(db_report)
     return db_report
@@ -371,12 +441,15 @@ async def generate_alternatives(
 ):
     if not request.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is empty")
+    ensure_user_can_generate(db, current_user)
     try:
         alternatives = model.generate_reports(request.prompt.strip(), request.report_format)
         saved = persist_prompt_session(
             db, current_user, request.prompt.strip(), request.report_format, alternatives
         )
         return session_payload(saved)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
 
@@ -454,6 +527,7 @@ async def alternative_docx(report: model.RadiologyReport, current_user: User = D
 
 @app.post("/api/generate-report-pdf")
 async def generate_report_with_pdf(request: ReportRequest, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    ensure_user_can_generate(db, current_user)
     try:
         combined_input = f"""
         Patient Information: {request.patient_info}
@@ -489,6 +563,7 @@ async def generate_report_with_pdf(request: ReportRequest, current_user: User = 
             scan_image_name=request.scan_image_name,
         )
         db.add(db_report)
+        update_automatic_lock(db, current_user)
         db.commit()
 
         pdf_filename = model.report_to_pdf(report)

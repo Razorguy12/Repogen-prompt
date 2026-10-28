@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { AppHeader } from '../components/AppHeader'
 import { ReportCard } from '../components/ReportCard'
 import { useAuth } from '../context/AuthContext'
-import { getUsers, getMe, createUser, getUserReports, getReports, updateUserPassword, deleteDoctor } from '../api/reports'
+import { getUsers, getMe, createUser, getUserReports, getReports, updateUserPassword, deleteDoctor, setUserLocked } from '../api/reports'
 import type { AdminUser } from '../types'
 import { ApiError } from '../api/client'
 
@@ -108,6 +108,16 @@ export default function AdminPage() {
     }
   }
 
+  const handleUserLock = async (user: AdminUser) => {
+    try {
+      await setUserLocked(user.id, !user.is_locked)
+      toast.success(user.is_locked ? `${user.name} unlocked` : `${user.name} locked`)
+      await refetchUsers()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Failed to update account lock')
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <AppHeader />
@@ -177,13 +187,15 @@ export default function AdminPage() {
                 onChange={(e) => setUserSearch(e.target.value)}
               />
               <div className="overflow-x-auto -mx-1">
-                <table className="w-full min-w-[760px] text-left border-collapse">
+                <table className="w-full min-w-[900px] text-left border-collapse">
                   <thead>
                     <tr className="bg-primary/5">
                       <th className="p-3 font-semibold text-primary-dark">Name</th>
                       <th className="p-3 font-semibold text-primary-dark">Username</th>
                       <th className="p-3 font-semibold text-primary-dark">Email</th>
                       <th className="p-3 font-semibold text-primary-dark">Role</th>
+                      <th className="p-3 font-semibold text-primary-dark">Total Reports</th>
+                      <th className="p-3 font-semibold text-primary-dark">Access</th>
                       <th className="p-3 font-semibold text-primary-dark">Actions</th>
                     </tr>
                   </thead>
@@ -197,7 +209,23 @@ export default function AdminPage() {
                         <td className="p-3" onClick={() => setSelectedUser(u)}>{u.username}</td>
                         <td className="p-3" onClick={() => setSelectedUser(u)}>{u.email}</td>
                         <td className="p-3" onClick={() => setSelectedUser(u)}>{u.is_admin ? 'Admin' : 'Doctor'}</td>
+                        <td className="p-3" onClick={() => setSelectedUser(u)}>{u.report_count}</td>
+                        <td className="p-3">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${!u.is_admin && u.is_locked ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            <span aria-hidden="true">{u.is_admin ? '✓' : u.is_locked ? '🔒' : '🔓'}</span>
+                            {u.is_admin ? 'Admin exempt' : u.is_locked ? 'Locked' : 'Active'}
+                          </span>
+                        </td>
                         <td className="p-3 whitespace-nowrap">
+                          {!u.is_admin && (
+                            <button
+                              type="button"
+                              className={`btn text-sm py-1 px-3 ${u.is_locked ? 'btn-primary' : 'btn-secondary'}`}
+                              onClick={() => handleUserLock(u)}
+                            >
+                              {u.is_locked ? 'Unlock' : 'Lock'}
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="btn btn-secondary text-sm py-1 px-3"

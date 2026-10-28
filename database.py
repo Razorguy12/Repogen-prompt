@@ -40,6 +40,8 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     is_admin = Column(Boolean, default=False)
+    is_locked = Column(Boolean, default=False, nullable=False)
+    report_quota_start = Column(Integer, default=0, nullable=False)
     
     reports = relationship("Report", back_populates="user")
 
@@ -70,7 +72,7 @@ def get_db():
 
 
 def run_migrations(db_engine):
-    """Add new columns to existing reports table if missing."""
+    """Add new columns to existing tables if missing."""
     is_sqlite = db_engine.dialect.name == "sqlite"
     timestamp_type = "DATETIME" if is_sqlite else "TIMESTAMP"
 
@@ -108,4 +110,25 @@ def run_migrations(db_engine):
                         f"WHERE updated_at IS NULL"
                     )
                 )
+        conn.commit()
+
+    with db_engine.connect() as conn:
+        if is_sqlite:
+            user_columns = {
+                row[1]
+                for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()
+            }
+        else:
+            rows = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'users'"
+                )
+            ).fetchall()
+            user_columns = {row[0] for row in rows}
+
+        if "is_locked" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_locked BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "report_quota_start" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN report_quota_start INTEGER NOT NULL DEFAULT 0"))
         conn.commit()

@@ -180,6 +180,13 @@ export async function deleteDoctor(userId: number): Promise<{ msg: string }> {
   return apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
 }
 
+export async function setUserLocked(userId: number, locked: boolean): Promise<{ msg: string }> {
+  return apiFetch(`/api/admin/users/${userId}/lock`, {
+    method: 'PATCH',
+    body: JSON.stringify({ locked }),
+  })
+}
+
 export async function getUserReports(userId: number): Promise<ReportSummary[]> {
   return apiFetch<ReportSummary[]>(`/api/admin/users/${userId}/reports`)
 }

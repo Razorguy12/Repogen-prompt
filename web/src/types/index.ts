@@ -111,6 +111,8 @@ export interface AdminUser {
   username: string
   email: string
   is_admin: boolean
+  is_locked: boolean
+  report_count: number
 }
 
 export interface StudyTemplate {
