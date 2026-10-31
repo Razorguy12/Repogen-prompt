@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import logoUrl from '../assets/logo.svg'
 import { useAuth } from '../context/AuthContext'
 
 interface AppHeaderProps {
@@ -9,7 +10,7 @@ interface AppHeaderProps {
 export function Logo() {
   return (
     <Link to="/" className="flex items-center gap-2 sm:gap-3 no-underline shrink-0">
-      <img src="/favicon.svg" alt="" className="w-8 h-8 sm:w-9 sm:h-9 shrink-0" />
+      <img src={logoUrl} alt="" className="w-8 h-8 sm:w-9 sm:h-9 shrink-0" />
       <span className="text-lg sm:text-xl font-bold text-primary-dark tracking-tight">repogen</span>
     </Link>
   )

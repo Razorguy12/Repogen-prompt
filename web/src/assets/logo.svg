@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <mask id="slices">
+      <rect width="64" height="64" fill="#fff"/>
+      <rect y="20.5" width="64" height="2.2" fill="#000"/>
+      <rect y="27.5" width="64" height="2.2" fill="#000"/>
+      <rect y="34.5" width="64" height="2.2" fill="#000"/>
+      <rect y="41.5" width="64" height="2.2" fill="#000"/>
+    </mask>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0F6B5C"/>
+  <g mask="url(#slices)" fill="#fff">
+    <rect x="17" y="13" width="9" height="38" rx="1.5"/>
+    <path d="M24 13h12.5a11 11 0 0 1 0 22H24v-8h11.5a3 3 0 0 0 0-6H24z"/>
+    <path d="M30 33h9l9.5 18h-9.5z"/>
+  </g>
+</svg>
