@@ -229,7 +229,7 @@ def report_to_docx(report: RadiologyReport, filename: Optional[str] = None) -> s
     note = doc.add_paragraph()
     note.paragraph_format.space_before = Pt(18)
     run = note.add_run(
-        "AI-assisted draft — verify every statement against the source study before clinical use. "
+        "AI-GENERATED DRAFT — NOT FOR CLINICAL USE UNTIL REVIEWED. This report has not been reviewed or approved by a physician and must be independently verified against the source study and signed off by a board-certified radiologist or licensed physician. "
         "This document is intended for editing in Microsoft Word."
     )
     run.italic = True
@@ -297,7 +297,7 @@ def report_to_pdf(report: RadiologyReport, filename: Optional[str] = None) -> st
         story.append(Paragraph(sanitize_pdf_text(value), body_style))
 
     story += [Spacer(1, 18), Paragraph(
-        "AI-assisted draft — verify all content against the source study before clinical use.",
+        "AI-GENERATED DRAFT — NOT FOR CLINICAL USE UNTIL REVIEWED. This report has not been reviewed or approved by a physician and must be independently verified against the source study and signed off by a board-certified radiologist or licensed physician.",
         ParagraphStyle("Disclaimer", parent=styles["Italic"], fontSize=8,
                        textColor=colors.HexColor("#777777")),
     )]

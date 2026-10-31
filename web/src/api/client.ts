@@ -14,6 +14,14 @@ export function clearToken(): void {
   sessionStorage.removeItem('is_admin')
 }
 
+export const SESSION_EXPIRED_KEY = 'session_expired'
+
+export function expireSession(): void {
+  clearToken()
+  sessionStorage.setItem(SESSION_EXPIRED_KEY, '1')
+  window.location.assign('/login')
+}
+
 export class ApiError extends Error {
   status: number
 
@@ -44,6 +52,7 @@ export async function apiFetch<T>(
   const response = await fetch(path, { ...options, headers })
 
   if (!response.ok) {
+    if (response.status === 401 && token && path !== '/api/token') expireSession()
     let message = `Request failed (${response.status})`
     try {
       const data = await response.json()
@@ -84,6 +93,7 @@ export async function apiFetchBlob(
 
   const response = await fetch(path, { ...options, headers })
   if (!response.ok) {
+    if (response.status === 401 && token) expireSession()
     throw new ApiError(response.status, 'Download failed')
   }
   return response.blob()

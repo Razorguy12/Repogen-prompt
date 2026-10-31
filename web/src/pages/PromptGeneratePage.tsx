@@ -87,6 +87,7 @@ function sessionFromSummary(r: ReportSummary): PromptSession | null {
     reports: alternatives,
     prompt: params.prompt || '',
     report_format: params.report_format || '',
+    status: r.status,
   }
 }
 
@@ -258,6 +259,7 @@ export default function PromptGeneratePage() {
     if (!session) return
     try {
       await updateReportStatus(session.id, 'final')
+      setSession((s) => (s ? { ...s, status: 'final' } : s))
       toast.success('Marked as final')
       queryClient.invalidateQueries({ queryKey: ['reports'] })
     } catch (err) {
@@ -430,8 +432,10 @@ export default function PromptGeneratePage() {
                     )}
 
                     <footer>
-                      AI-generated draft. Verify every statement against the study. Choosing a tab saves that version for this timestamped record.
-                      <button type="button" className="text-link" onClick={finalize}>Mark final</button>
+                      AI-generated draft. Not a medical record or diagnosis; it has not been reviewed or approved by a physician and requires review and sign-off by a board-certified radiologist or licensed physician before any clinical use. Choosing a tab saves that version for this timestamped record.
+                      {session?.status === 'final'
+                        ? <span className="badge-final">Final</span>
+                        : <button type="button" className="text-link" onClick={finalize}>Mark final</button>}
                     </footer>
                   </div>
                 )}

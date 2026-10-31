@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -6,7 +6,7 @@ import { z } from 'zod'
 import toast from 'react-hot-toast'
 import { useAuth } from '../context/AuthContext'
 import { Logo } from '../components/AppHeader'
-import { ApiError } from '../api/client'
+import { ApiError, SESSION_EXPIRED_KEY } from '../api/client'
 
 const schema = z.object({
   username: z.string().min(1, 'Username is required'),
@@ -27,6 +27,13 @@ export default function LoginPage() {
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
   })
+
+  useEffect(() => {
+    if (sessionStorage.getItem(SESSION_EXPIRED_KEY)) {
+      sessionStorage.removeItem(SESSION_EXPIRED_KEY)
+      toast.error('Your session timed out due to inactivity. Please log in again.')
+    }
+  }, [])
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true)

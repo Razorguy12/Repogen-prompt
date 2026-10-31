@@ -1,7 +1,10 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { login as apiLogin, getMe } from '../api/reports'
-import { getToken, setToken, clearToken } from '../api/client'
+import { getToken, setToken, clearToken, SESSION_EXPIRED_KEY } from '../api/client'
+
+const IDLE_TIMEOUT_MS = 20 * 60 * 1000
+const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'touchstart', 'scroll', 'mousemove'] as const
 
 interface AuthContextValue {
   token: string | null
@@ -60,6 +63,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAdmin(false)
     queryClient.clear()
   }, [queryClient])
+
+  useEffect(() => {
+    if (!token) return
+    let timer: number
+    const expire = () => {
+      sessionStorage.setItem(SESSION_EXPIRED_KEY, '1')
+      logout()
+    }
+    const reset = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(expire, IDLE_TIMEOUT_MS)
+    }
+    reset()
+    ACTIVITY_EVENTS.forEach((e) => window.addEventListener(e, reset, { passive: true }))
+    return () => {
+      window.clearTimeout(timer)
+      ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, reset))
+    }
+  }, [token, logout])
 
   return (
     <AuthContext.Provider value={{ token, name, isAdmin, isLoading, login, logout }}>

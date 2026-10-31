@@ -62,6 +62,7 @@ export interface PromptSession {
   reports: ReportAlternative[]
   prompt: string
   report_format?: string
+  status?: 'draft' | 'final'
 }
 
 export interface ReportInputParams {
