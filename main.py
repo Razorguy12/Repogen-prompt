@@ -176,7 +176,7 @@ def check_report_access(report: Report, user: User):
 
 @app.post("/api/token")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == form_data.username).first()
+    user = db.query(User).filter(func.lower(User.username) == form_data.username.strip().lower()).first()
     if not user or not auth.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
     access_token = auth.create_access_token(data={"sub": user.username})
@@ -188,7 +188,7 @@ async def read_users_me(current_user: User = Depends(auth.get_current_user)):
 
 @app.post("/api/users")
 async def create_user(user: UserCreate, db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
-    db_user = db.query(User).filter(User.username == user.username).first()
+    db_user = db.query(User).filter(func.lower(User.username) == user.username.strip().lower()).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Username already registered")
     new_user = User(
