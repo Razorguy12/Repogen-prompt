@@ -400,8 +400,8 @@ export default function PromptGeneratePage() {
                       <div className="sheet-actions">
                         <button type="button" onClick={() => setEditing((v) => !v)}>{editing ? 'Close editor' : 'Edit'}</button>
                         <button type="button" onClick={() => copyReport(current)}>Copy</button>
-                        <button type="button" onClick={() => downloadAlternativeDocx(current).catch((e) => toast.error(e.message))}>Edit in Word</button>
-                        <button type="button" className="accent" onClick={() => downloadAlternativePdf(current).catch((e) => toast.error(e.message))}>PDF</button>
+                        <button type="button" onClick={() => downloadAlternativeDocx(current, session.id).catch((e) => toast.error(e.message))}>Edit in Word</button>
+                        <button type="button" className="accent" onClick={() => downloadAlternativePdf(current, session.id).catch((e) => toast.error(e.message))}>PDF</button>
                       </div>
                     </header>
 

@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Request, Query
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -15,9 +15,17 @@ from groq import Groq
 import pdfplumber
 import model.model as model
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
-from database import engine, Base, get_db, User, Report, run_migrations
+from sqlalchemy import text, func, or_, desc, asc
+from database import engine, Base, get_db, User, Report, AuditEvent, run_migrations
 import auth
+from audit_service import log_audit_event, csv_safe_cell
+import csv
+import io
+import time
+import uuid
+import threading
+from time import monotonic
+from datetime import timezone
 
 # Create DB tables and apply column migrations for existing databases
 Base.metadata.create_all(bind=engine)
@@ -27,6 +35,25 @@ run_migrations(engine)
 load_dotenv()
 
 app = FastAPI(title="Radiology Report Generator", version="1.0.0")
+_audit_rate_lock = threading.Lock()
+_audit_rate_windows: dict[tuple[int, str], list[float]] = {}
+
+def enforce_audit_rate_limit(user: User, action: str, limit: int = 60, window_seconds: int = 60):
+    now = monotonic()
+    key = (user.id, action)
+    with _audit_rate_lock:
+        hits = [t for t in _audit_rate_windows.get(key, []) if now - t < window_seconds]
+        if len(hits) >= limit:
+            raise HTTPException(status_code=429, detail="Audit query rate limit exceeded")
+        hits.append(now)
+        _audit_rate_windows[key] = hits
+
+@app.middleware("http")
+async def audit_request_id(request: Request, call_next):
+    request.state.request_id = str(uuid.uuid4())
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request.state.request_id
+    return response
 
 @app.on_event("startup")
 def startup():
@@ -175,12 +202,24 @@ def check_report_access(report: Report, user: User):
         raise HTTPException(status_code=403, detail="Not authorized to access this report")
 
 @app.post("/api/token")
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(func.lower(User.username) == form_data.username.strip().lower()).first()
     if not user or not auth.verify_password(form_data.password, user.hashed_password):
+        log_audit_event(db, "LOGIN_FAILED", user_id=user.id if user else None, request=request,
+                        status="FAILED", details={"failure_category": "invalid_credentials"})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
     access_token = auth.create_access_token(data={"sub": user.username})
+    log_audit_event(db, "LOGIN_SUCCESS", user_id=user.id, request=request, details={"auth_method": "password"})
     return {"access_token": access_token, "token_type": "bearer", "is_admin": user.is_admin, "name": user.name}
+
+@app.post("/api/logout", status_code=204)
+async def logout(request: Request, reason: str | None = Query(default=None), current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    if reason == "session_expired":
+        log_audit_event(db, "SESSION_EXPIRED", user_id=current_user.id, request=request,
+                        status="WARNING", details={"expiration_source": "idle_timeout"})
+    else:
+        log_audit_event(db, "LOGOUT", user_id=current_user.id, request=request)
+    return None
 
 @app.get("/api/users/me")
 async def read_users_me(current_user: User = Depends(auth.get_current_user)):
@@ -200,6 +239,8 @@ async def create_user(user: UserCreate, db: Session = Depends(get_db), current_a
     )
     db.add(new_user)
     db.commit()
+    log_audit_event(db, "USER_CREATED", user_id=current_admin.id, resource_type="user", resource_id=new_user.id,
+                    details={"role": "admin" if new_user.is_admin else "user"})
     return {"msg": "User created successfully"}
 
 @app.get("/api/users")
@@ -239,6 +280,8 @@ async def update_user_lock(user_id: int, request: UserLockUpdate, db: Session = 
     if not request.locked:
         user.report_quota_start = report_count_for_user(db, user.id)
     db.commit()
+    log_audit_event(db, "USER_UPDATED", user_id=current_admin.id, resource_type="user", resource_id=user.id,
+                    details={"operation": "lock" if request.locked else "unlock"})
     return {
         "msg": "User locked" if request.locked else "User unlocked",
         "is_locked": user.is_locked,
@@ -254,6 +297,7 @@ async def update_user_password(user_id: int, request: PasswordUpdate, db: Sessio
         raise HTTPException(status_code=404, detail="User not found")
     user.hashed_password = auth.get_password_hash(request.password)
     db.commit()
+    log_audit_event(db, "PASSWORD_RESET", user_id=current_admin.id, resource_type="user", resource_id=user.id)
     return {"msg": "Password updated successfully"}
 
 @app.delete("/api/admin/users/{user_id}")
@@ -269,6 +313,7 @@ async def delete_doctor(user_id: int, db: Session = Depends(get_db), current_adm
     db.query(Report).filter(Report.user_id == user_id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
+    log_audit_event(db, "USER_DEACTIVATED", user_id=current_admin.id, resource_type="user", resource_id=user_id)
     return {"msg": "Admin deleted successfully" if user.is_admin else "Doctor deleted successfully"}
 
 @app.get("/api/")
@@ -310,8 +355,15 @@ async def dashboard_stats(db: Session = Depends(get_db), current_user: User = De
     }
 
 @app.post("/api/generate-report", response_model=GenerateReportResponse)
-async def generate_report(request: ReportRequest, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
-    ensure_user_can_generate(db, current_user)
+async def generate_report(request: ReportRequest, http_request: Request, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    started = time.perf_counter()
+    try:
+        ensure_user_can_generate(db, current_user)
+    except HTTPException:
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
+                        status="FAILED", details={"failure_category": "generation_not_allowed"},
+                        duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
+        raise
     try:
         combined_input = f"""
         Patient Information: {request.patient_info}
@@ -353,11 +405,17 @@ async def generate_report(request: ReportRequest, current_user: User = Depends(a
         update_automatic_lock(db, current_user)
         db.commit()
         db.refresh(db_report)
+        log_audit_event(db, "REPORT_GENERATED", user_id=current_user.id, request=http_request,
+                        details={"workflow": "structured"}, duration_ms=int((time.perf_counter() - started) * 1000),
+                        resource_type="report", resource_id=db_report.id)
 
         return GenerateReportResponse(id=db_report.id, report=report)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
+                        status="FAILED", details={"failure_category": "generation_error"},
+                        duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
+        raise HTTPException(status_code=500, detail="Failed to generate report")
 
 class PromptRequest(BaseModel):
     prompt: str
@@ -436,22 +494,37 @@ def session_payload(report: Report) -> dict:
 @app.post("/api/generate-alternatives", response_model=PromptSessionResponse)
 async def generate_alternatives(
     request: PromptRequest,
+    http_request: Request,
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
+    started = time.perf_counter()
     if not request.prompt.strip():
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
+                        status="FAILED", details={"failure_category": "empty_prompt", "workflow": "prompt"},
+                        duration_ms=0, resource_type="report")
         raise HTTPException(status_code=400, detail="Prompt is empty")
-    ensure_user_can_generate(db, current_user)
     try:
+        ensure_user_can_generate(db, current_user)
         alternatives = model.generate_reports(request.prompt.strip(), request.report_format)
         saved = persist_prompt_session(
             db, current_user, request.prompt.strip(), request.report_format, alternatives
         )
+        log_audit_event(db, "REPORT_GENERATED", user_id=current_user.id, request=http_request,
+                        details={"workflow": "prompt", "variants": len(alternatives.reports)},
+                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        resource_type="report", resource_id=saved.id)
         return session_payload(saved)
     except HTTPException:
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
+                        status="FAILED", details={"failure_category": "generation_not_allowed", "workflow": "prompt"},
+                        duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
+                        status="FAILED", details={"failure_category": "generation_error", "workflow": "prompt"},
+                        duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
+        raise HTTPException(status_code=500, detail="Failed to generate report")
 
 
 @app.patch("/api/reports/{report_id}/draft")
@@ -504,30 +577,53 @@ async def update_prompt_draft(
 
 
 @app.post("/api/alternative-pdf")
-async def alternative_pdf(report: model.RadiologyReport, current_user: User = Depends(auth.get_current_user)):
+async def alternative_pdf(report: model.RadiologyReport, request: Request, report_id: int | None = None,
+                          current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     try:
+        if report_id is not None:
+            check_report_access(get_report_or_404(report_id, db), current_user)
         pdf_filename = model.report_to_pdf(report)
+        log_audit_event(db, "REPORT_DOWNLOADED", user_id=current_user.id, request=request,
+                        resource_type="report" if report_id is not None else "report_export",
+                        resource_id=report_id, details={"format": "pdf", "workflow": "alternative"})
         return FileResponse(pdf_filename, media_type="application/pdf", filename=os.path.basename(pdf_filename))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create PDF: {str(e)}")
 
 
 @app.post("/api/alternative-docx")
-async def alternative_docx(report: model.RadiologyReport, current_user: User = Depends(auth.get_current_user)):
+async def alternative_docx(report: model.RadiologyReport, request: Request, report_id: int | None = None,
+                           current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     try:
+        if report_id is not None:
+            check_report_access(get_report_or_404(report_id, db), current_user)
         filename = model.report_to_docx(report)
+        log_audit_event(db, "REPORT_DOWNLOADED", user_id=current_user.id, request=request,
+                        resource_type="report" if report_id is not None else "report_export",
+                        resource_id=report_id, details={"format": "docx", "workflow": "alternative"})
         download_name = f"radiology_report_{report.type}.docx"
         return FileResponse(
             filename,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename=download_name,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create Word document: {str(e)}")
 
 @app.post("/api/generate-report-pdf")
-async def generate_report_with_pdf(request: ReportRequest, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
-    ensure_user_can_generate(db, current_user)
+async def generate_report_with_pdf(request: ReportRequest, http_request: Request, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    started = time.perf_counter()
+    try:
+        ensure_user_can_generate(db, current_user)
+    except HTTPException:
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request, status="FAILED",
+                        details={"failure_category": "generation_not_allowed", "workflow": "pdf"},
+                        duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
+        raise
     try:
         combined_input = f"""
         Patient Information: {request.patient_info}
@@ -565,18 +661,35 @@ async def generate_report_with_pdf(request: ReportRequest, current_user: User = 
         db.add(db_report)
         update_automatic_lock(db, current_user)
         db.commit()
+        db.refresh(db_report)
 
         pdf_filename = model.report_to_pdf(report)
+        log_audit_event(db, "REPORT_GENERATED", user_id=current_user.id, request=http_request,
+                        details={"workflow": "structured_pdf"}, duration_ms=int((time.perf_counter() - started) * 1000),
+                        resource_type="report", resource_id=db_report.id)
+        log_audit_event(db, "REPORT_DOWNLOADED", user_id=current_user.id, request=http_request,
+                        details={"format": "pdf"}, resource_type="report", resource_id=db_report.id)
         return FileResponse(pdf_filename, media_type="application/pdf", filename=pdf_filename)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate report PDF: {str(e)}")
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request, status="FAILED",
+                        details={"failure_category": "generation_error", "workflow": "pdf"},
+                        duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
+        raise HTTPException(status_code=500, detail="Failed to generate report PDF")
 
 @app.post("/api/create-pdf-from-report")
-async def create_pdf_from_report(report: model.RadiologyReport, current_user: User = Depends(auth.get_current_user)):
+async def create_pdf_from_report(report: model.RadiologyReport, request: Request, report_id: int | None = None,
+                                 current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     try:
+        if report_id is not None:
+            check_report_access(get_report_or_404(report_id, db), current_user)
         pdf_filename = model.report_to_pdf(report)
+        log_audit_event(db, "REPORT_DOWNLOADED", user_id=current_user.id, request=request,
+                        resource_type="report" if report_id is not None else "report_export",
+                        resource_id=report_id, details={"format": "pdf"})
         return FileResponse(pdf_filename, media_type="application/pdf", filename=pdf_filename)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create PDF from report: {str(e)}")
 
@@ -638,6 +751,7 @@ async def get_my_reports(db: Session = Depends(get_db), current_user: User = Dep
 async def get_report(report_id: int, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     report = get_report_or_404(report_id, db)
     check_report_access(report, current_user)
+    log_audit_event(db, "REPORT_VIEWED", user_id=current_user.id, resource_type="report", resource_id=report.id)
     return serialize_report(report)
 
 @app.patch("/api/reports/{report_id}")
@@ -662,6 +776,7 @@ async def update_report(report_id: int, body: ReportUpdate, db: Session = Depend
     report.updated_at = datetime.datetime.utcnow()
     db.commit()
     db.refresh(report)
+    log_audit_event(db, "REPORT_UPDATED", user_id=current_user.id, resource_type="report", resource_id=report.id)
     return serialize_report(report)
 
 @app.patch("/api/reports/{report_id}/status")
@@ -674,12 +789,189 @@ async def update_report_status(report_id: int, body: StatusUpdate, db: Session =
     report.updated_at = datetime.datetime.utcnow()
     db.commit()
     db.refresh(report)
+    log_audit_event(db, "REPORT_STATUS_CHANGED", user_id=current_user.id, resource_type="report", resource_id=report.id,
+                    details={"status": report.status})
     return serialize_report(report)
 
 @app.get("/api/admin/users/{user_id}/reports")
 async def get_user_reports(user_id: int, db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
     reports = db.query(Report).filter(Report.user_id == user_id).order_by(Report.created_at.desc()).all()
     return [serialize_report(r) for r in reports]
+
+
+def _audit_query(db, search=None, user_id=None, event_type=None, event_status=None,
+                 resource_id=None, start_date=None, end_date=None):
+    query = db.query(AuditEvent).outerjoin(User, AuditEvent.user_id == User.id)
+    if search:
+        term = f"%{search[:120]}%"
+        query = query.filter(or_(User.username.ilike(term), User.email.ilike(term), User.name.ilike(term)))
+    if user_id is not None:
+        query = query.filter(AuditEvent.user_id == user_id)
+    if event_type:
+        query = query.filter(AuditEvent.event_type == event_type)
+    if event_status:
+        query = query.filter(AuditEvent.status == event_status.upper())
+    if resource_id:
+        query = query.filter(AuditEvent.resource_id.ilike(f"%{resource_id[:128]}%"))
+    if start_date:
+        query = query.filter(AuditEvent.created_at >= start_date)
+    if end_date:
+        query = query.filter(AuditEvent.created_at <= end_date)
+    return query
+
+
+def _event_payload(event, user=None):
+    return {
+        "id": event.id, "event_type": event.event_type, "user_id": event.user_id,
+        "username": user.username if user else None, "email": user.email if user else None,
+        "status": event.status, "resource_type": event.resource_type,
+        "resource_id": event.resource_id, "ip_address": event.ip_address,
+        "user_agent": event.user_agent, "request_id": event.request_id,
+        "duration_ms": event.duration_ms, "details": event.details or {},
+        "created_at": event.created_at,
+    }
+
+
+def _parse_audit_date(value, end=False):
+    if not value:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if len(value) == 10 and end:
+            parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Dates must be ISO-8601 values")
+
+
+@app.get("/api/admin/audit-logs")
+async def list_audit_logs(
+    search: str | None = None, user_id: int | None = None, event_type: str | None = None,
+    event_status: str | None = Query(default=None, alias="status"), resource_id: str | None = None,
+    start_date: str | None = None, end_date: str | None = None,
+    sort_order: str = Query(default="newest", pattern="^(newest|oldest)$"),
+    page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin),
+):
+    enforce_audit_rate_limit(current_admin, "list")
+    start, end = _parse_audit_date(start_date), _parse_audit_date(end_date, True)
+    query = _audit_query(db, search, user_id, event_type, event_status, resource_id, start, end)
+    total = query.count()
+    ordering = asc if sort_order == "oldest" else desc
+    rows = query.order_by(ordering(AuditEvent.created_at), ordering(AuditEvent.id)).offset((page - 1) * page_size).limit(page_size).all()
+    users = {u.id: u for u in db.query(User).filter(User.id.in_({e.user_id for e in rows if e.user_id})).all()} if rows else {}
+    return {"items": [_event_payload(e, users.get(e.user_id)) for e in rows], "total": total,
+            "page": page, "page_size": page_size, "total_pages": (total + page_size - 1) // page_size}
+
+
+@app.get("/api/admin/audit-logs/{event_id:int}")
+async def get_audit_log(event_id: int, db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
+    enforce_audit_rate_limit(current_admin, "detail", 120)
+    event = db.query(AuditEvent).filter(AuditEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Audit event not found")
+    user = db.query(User).filter(User.id == event.user_id).first() if event.user_id else None
+    return _event_payload(event, user)
+
+
+@app.get("/api/admin/audit-stats")
+async def audit_stats(start_date: str | None = None, end_date: str | None = None,
+                      db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
+    enforce_audit_rate_limit(current_admin, "stats")
+    start, end = _parse_audit_date(start_date), _parse_audit_date(end_date, True)
+    q = db.query(AuditEvent)
+    if start: q = q.filter(AuditEvent.created_at >= start)
+    if end: q = q.filter(AuditEvent.created_at <= end)
+    def count_event(name, successful=None):
+        scoped = q.filter(AuditEvent.event_type == name)
+        if successful is not None: scoped = scoped.filter(AuditEvent.status == successful)
+        return scoped.count()
+    active = q.with_entities(func.count(func.distinct(AuditEvent.user_id))).filter(AuditEvent.user_id.isnot(None)).scalar() or 0
+    failed = q.filter(AuditEvent.status == "FAILED", AuditEvent.event_type.in_(["LOGIN_FAILED", "REPORT_GENERATION_FAILED", "API_ERROR"])).count()
+    return {"total_users": db.query(func.count(User.id)).scalar() or 0, "active_users": active,
+            "reports_generated": count_event("REPORT_GENERATED", "SUCCESS"), "failed_operations": failed,
+            "total_logins": count_event("LOGIN_SUCCESS", "SUCCESS"),
+            "total_downloads": count_event("REPORT_DOWNLOADED", "SUCCESS")}
+
+
+@app.get("/api/admin/audit-analytics")
+async def audit_analytics(start_date: str | None = None, end_date: str | None = None,
+                          db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
+    enforce_audit_rate_limit(current_admin, "analytics", 30)
+    start = _parse_audit_date(start_date) or datetime.datetime.now(timezone.utc) - datetime.timedelta(days=29)
+    end = _parse_audit_date(end_date, True) or datetime.datetime.now(timezone.utc)
+    if (end - start).days > 366: raise HTTPException(status_code=422, detail="Date range cannot exceed 366 days")
+    rows = db.query(AuditEvent.event_type, AuditEvent.status, AuditEvent.user_id, AuditEvent.created_at).filter(
+        AuditEvent.created_at >= start, AuditEvent.created_at <= end).all()
+    daily = {}
+    user_totals = {}
+    generations = {"success": 0, "failed": 0}
+    for event, event_status, uid, created in rows:
+        day = created.date().isoformat()
+        bucket = daily.setdefault(day, {"date": day, "logins": 0, "reports": 0, "downloads": 0})
+        if event == "LOGIN_SUCCESS": bucket["logins"] += 1
+        if event == "REPORT_GENERATED":
+            bucket["reports"] += 1
+            if event_status == "SUCCESS": generations["success"] += 1
+        if event == "REPORT_GENERATION_FAILED": generations["failed"] += 1
+        if event == "REPORT_DOWNLOADED": bucket["downloads"] += 1
+        if uid and event_status == "SUCCESS" and event in {"LOGIN_SUCCESS", "REPORT_GENERATED", "REPORT_DOWNLOADED", "REPORT_VIEWED"}:
+            user_totals[uid] = user_totals.get(uid, 0) + (3 if event == "REPORT_GENERATED" else 1)
+    ids = sorted(user_totals, key=user_totals.get, reverse=True)[:10]
+    users = {u.id: u for u in db.query(User).filter(User.id.in_(ids)).all()} if ids else {}
+    return {"activity": sorted(daily.values(), key=lambda x: x["date"]), "generation": generations,
+            "users": [{"user_id": uid, "username": users[uid].username, "activity_count": user_totals[uid]}
+                      for uid in ids if uid in users]}
+
+
+@app.get("/api/admin/users/{user_id}/activity")
+async def user_activity(user_id: int, start_date: str | None = None, end_date: str | None = None,
+                        page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100),
+                        db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
+    enforce_audit_rate_limit(current_admin, "user_activity")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user: raise HTTPException(status_code=404, detail="User not found")
+    start, end = _parse_audit_date(start_date), _parse_audit_date(end_date, True)
+    query = db.query(AuditEvent).filter(AuditEvent.user_id == user_id)
+    if start: query = query.filter(AuditEvent.created_at >= start)
+    if end: query = query.filter(AuditEvent.created_at <= end)
+    counts = {name: query.filter(AuditEvent.event_type == name, AuditEvent.status == "SUCCESS").count()
+              for name in ("LOGIN_SUCCESS", "REPORT_GENERATED", "REPORT_DOWNLOADED")}
+    failed_logins = query.filter(AuditEvent.event_type == "LOGIN_FAILED", AuditEvent.status == "FAILED").count()
+    last_login = query.filter(AuditEvent.event_type == "LOGIN_SUCCESS").order_by(desc(AuditEvent.created_at)).first()
+    total = query.count()
+    rows = query.order_by(desc(AuditEvent.created_at)).offset((page - 1) * page_size).limit(page_size).all()
+    return {"user": {"id": user.id, "name": user.name, "username": user.username, "email": user.email,
+                      "is_admin": user.is_admin, "is_locked": user.is_locked},
+            "stats": {"successful_logins": counts["LOGIN_SUCCESS"], "reports_generated": counts["REPORT_GENERATED"],
+                      "downloads": counts["REPORT_DOWNLOADED"], "failed_logins": failed_logins,
+                      "last_login": last_login.created_at if last_login else None},
+            "items": [_event_payload(e, user) for e in rows], "total": total, "page": page, "page_size": page_size}
+
+
+@app.get("/api/admin/audit-logs/export")
+async def export_audit_logs(request: Request, search: str | None = None, user_id: int | None = None,
+                            event_type: str | None = None, event_status: str | None = Query(default=None, alias="status"),
+                            resource_id: str | None = None, start_date: str | None = None, end_date: str | None = None,
+                            db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
+    enforce_audit_rate_limit(current_admin, "export", 5, 3600)
+    start, end = _parse_audit_date(start_date), _parse_audit_date(end_date, True)
+    query = _audit_query(db, search, user_id, event_type, event_status, resource_id, start, end)
+    if query.count() > 10000: raise HTTPException(status_code=413, detail="Export is limited to 10,000 events; narrow the filters")
+    log_audit_event(db, "AUDIT_CSV_EXPORTED", user_id=current_admin.id, request=request,
+                    details={"filters_applied": sum(v is not None for v in (search, user_id, event_type, event_status, resource_id, start_date, end_date))})
+    def rows():
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["timestamp", "user_id", "username", "event_type", "status", "resource_id", "ip_address", "duration_ms"])
+        yield buffer.getvalue(); buffer.seek(0); buffer.truncate(0)
+        for event, username in query.with_entities(AuditEvent, User.username).order_by(desc(AuditEvent.created_at)).yield_per(500):
+            writer.writerow([csv_safe_cell(event.created_at.isoformat()), event.user_id, csv_safe_cell(username), event.event_type,
+                             event.status, csv_safe_cell(event.resource_id), csv_safe_cell(event.ip_address), event.duration_ms])
+            yield buffer.getvalue(); buffer.seek(0); buffer.truncate(0)
+    return StreamingResponse(rows(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=audit-logs.csv"})
 
 @app.get("/api/health")
 async def health_check():

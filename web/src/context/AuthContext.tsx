@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { login as apiLogin, getMe } from '../api/reports'
+import { login as apiLogin, logout as apiLogout, getMe } from '../api/reports'
 import { getToken, setToken, clearToken, SESSION_EXPIRED_KEY } from '../api/client'
 
 const IDLE_TIMEOUT_MS = 20 * 60 * 1000
@@ -12,7 +12,7 @@ interface AuthContextValue {
   isAdmin: boolean
   isLoading: boolean
   login: (username: string, password: string) => Promise<void>
-  logout: () => void
+  logout: (expired?: boolean) => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -56,7 +56,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear()
   }, [queryClient])
 
-  const logout = useCallback(() => {
+  const logout = useCallback((expired = false) => {
+    void apiLogout(expired ? 'session_expired' : undefined).catch(() => undefined)
     clearToken()
     setTokenState(null)
     setName(null)
@@ -69,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let timer: number
     const expire = () => {
       sessionStorage.setItem(SESSION_EXPIRED_KEY, '1')
-      logout()
+      logout(true)
     }
     const reset = () => {
       window.clearTimeout(timer)

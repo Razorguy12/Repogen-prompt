@@ -131,7 +131,7 @@ export default function ReportPreviewPage() {
     }
     setIsPdfLoading(true)
     try {
-      await downloadReportPdf(report)
+      await downloadReportPdf(report, reportId)
       toast.success('PDF downloaded')
     } catch {
       toast.error('PDF download failed')

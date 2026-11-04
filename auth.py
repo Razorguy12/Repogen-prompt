@@ -2,15 +2,16 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 import bcrypt
-from jose import JWTError, jwt
+from jose import JWTError, jwt, ExpiredSignatureError
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import get_db, User
 from dotenv import load_dotenv
+from audit_service import log_audit_event
 
 load_dotenv()
 
@@ -54,6 +55,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
+    except ExpiredSignatureError:
+        try:
+            expired_payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
+            expired_username = expired_payload.get("sub")
+            expired_user = db.query(User).filter(func.lower(User.username) == str(expired_username or "").strip().lower()).first()
+            log_audit_event(db, "SESSION_EXPIRED", user_id=expired_user.id if expired_user else None,
+                            status="WARNING", details={"failure_category": "token_expired"})
+        except Exception:
+            pass
+        raise credentials_exception
     except JWTError:
         raise credentials_exception
         
@@ -62,8 +73,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
-async def get_current_admin(current_user: User = Depends(get_current_user)):
+async def get_current_admin(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user.is_admin:
+        log_audit_event(db, "ACCESS_DENIED", user_id=current_user.id, status="FAILED",
+                        request=request, details={"resource": "admin_endpoint"})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to access this resource"

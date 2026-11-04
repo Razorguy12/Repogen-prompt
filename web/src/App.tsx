@@ -15,6 +15,7 @@ import GeneratePage from './pages/GeneratePage'
 import PromptGeneratePage from './pages/PromptGeneratePage'
 import ReportPreviewPage from './pages/ReportPreviewPage'
 import AdminPage from './pages/AdminPage'
+import AuditLogsPage from './pages/AuditLogsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,6 +34,7 @@ const router = createBrowserRouter([
   { path: '/generate-structured', element: <ProtectedRoute><GeneratePage /></ProtectedRoute> },
   { path: '/reports/:id', element: <ProtectedRoute><ReportPreviewPage /></ProtectedRoute> },
   { path: '/admin', element: <AdminRoute><AdminPage /></AdminRoute> },
+  { path: '/admin/audit-logs', element: <AdminRoute><AuditLogsPage /></AdminRoute> },
 ])
 
 export default function App() {

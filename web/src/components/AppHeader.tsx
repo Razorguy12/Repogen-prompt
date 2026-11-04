@@ -59,9 +59,10 @@ export function AppHeader({ variant = 'default' }: AppHeaderProps) {
                 + New Report
               </Link>
               {isAdmin && (
-                <Link to="/admin" className="btn btn-secondary text-xs sm:text-sm py-1.5 px-3">
-                  Admin
-                </Link>
+                <div className="flex items-center gap-1">
+                  <Link to="/admin" className="btn btn-secondary text-xs sm:text-sm py-1.5 px-3">Admin</Link>
+                  <Link to="/admin/audit-logs" className="btn btn-secondary text-xs sm:text-sm py-1.5 px-3">Audit Logs</Link>
+                </div>
               )}
               <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full">
                 {name}
@@ -120,13 +121,10 @@ export function AppHeader({ variant = 'default' }: AppHeaderProps) {
                   + New Report
                 </Link>
                 {isAdmin && (
-                  <Link
-                    to="/admin"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="btn btn-secondary text-xs py-2 px-3 text-center col-span-2"
-                  >
-                    ⚙️ Admin Panel
-                  </Link>
+                  <>
+                    <Link to="/admin" onClick={() => setMobileMenuOpen(false)} className="btn btn-secondary text-xs py-2 px-3 text-center">Admin Panel</Link>
+                    <Link to="/admin/audit-logs" onClick={() => setMobileMenuOpen(false)} className="btn btn-secondary text-xs py-2 px-3 text-center">Audit Logs</Link>
+                  </>
                 )}
                 <button
                   type="button"
