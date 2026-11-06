@@ -19,7 +19,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt, RGBColor
 from dotenv import load_dotenv
 from groq import Groq
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -51,10 +51,76 @@ class RadiologyReport(BaseModel):
     full_report: str
 
 
-class ReportAlternatives(BaseModel):
-    """Three alternative report drafts for the same case."""
-    reports: list[RadiologyReport] = Field(min_length=3, max_length=3)
+Modality = Literal["XR", "CT", "MRI", "US", "DOPPLER", "MAMMO", "FLUORO", "OTHER", "UNSPECIFIED"]
+Laterality = Literal["Left", "Right", "Bilateral", "Not applicable", "Not specified"]
+MODALITIES: tuple[str, ...] = Modality.__args__  # type: ignore[attr-defined]
+LATERALITIES: tuple[str, ...] = Laterality.__args__  # type: ignore[attr-defined]
 
+_MODALITY_SYNONYMS = {
+    "X-RAY": "XR", "XRAY": "XR", "CR": "XR", "DX": "XR", "RADIOGRAPH": "XR",
+    "USG": "US", "ULTRASOUND": "US", "SONOGRAPHY": "US",
+    "MR": "MRI", "MAMMOGRAPHY": "MAMMO", "FLUOROSCOPY": "FLUORO",
+}
+
+
+class ExamInfo(BaseModel):
+    """Structured description of the examination as the model understood it."""
+    modality: Modality
+    region: str = Field(min_length=1, max_length=120)
+    laterality: Laterality
+
+    @field_validator("modality", mode="before")
+    @classmethod
+    def _normalise_modality(cls, value):
+        if isinstance(value, str):
+            key = value.strip().upper()
+            return _MODALITY_SYNONYMS.get(key, key)
+        return value
+
+    @field_validator("laterality", mode="before")
+    @classmethod
+    def _normalise_laterality(cls, value):
+        if isinstance(value, str):
+            for option in LATERALITIES:
+                if value.strip().lower() == option.lower():
+                    return option
+        return value
+
+
+EXPECTED_ORDER = ["concise", "standard", "detailed"]
+
+
+class ReportAlternatives(BaseModel):
+    """Prompt v2 generation response: exam, three alternatives, and flags."""
+    exam: ExamInfo
+    reports: list[RadiologyReport] = Field(min_length=3, max_length=3)
+    flags: list[str]
+
+    @model_validator(mode="after")
+    def _check_order(self):
+        actual = [report.type for report in self.reports]
+        if actual != EXPECTED_ORDER:
+            raise ValueError(f"Expected reports in order {EXPECTED_ORDER}, got {actual}")
+        self.flags = [f.strip() for f in self.flags if isinstance(f, str) and f.strip()]
+        return self
+
+
+GenerationResponse = ReportAlternatives
+
+
+class GenerationError(RuntimeError):
+    """Raised when the model fails to return a schema-valid response after one retry."""
+
+    user_message = (
+        "The AI returned a response that could not be read, even after a retry. "
+        "Nothing was saved. Please try again."
+    )
+
+
+REPORT_PROMPT_VERSION = "v2"
+SCHEMA_RETRY_INSTRUCTION = (
+    "Your previous output was not valid JSON matching the schema. Return valid JSON only."
+)
 
 SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encoding="utf-8").strip()
 
@@ -71,6 +137,65 @@ def _extract_json(content: str) -> dict:
         if start >= 0 and end > start:
             return json.loads(content[start:end + 1])
         raise
+
+
+def parse_generation(content: str) -> ReportAlternatives:
+    """Parse and validate raw model output. Raises ValueError on any problem."""
+    try:
+        return ReportAlternatives.model_validate(_extract_json(content or ""))
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _chat_completion(client, messages: list[dict], json_mode: bool = True) -> str:
+    """One provider call; returns the message text (may be empty)."""
+    kwargs = dict(
+        model=GROQ_MODEL,
+        temperature=0.2,
+        max_completion_tokens=8192,
+        messages=messages,
+    )
+    if "gpt-oss" in GROQ_MODEL:
+        kwargs["reasoning_effort"] = "low"
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+    response = client.chat.completions.create(**kwargs)
+    return response.choices[0].message.content or ""
+
+
+def _complete(client, messages: list[dict]) -> str:
+    """Get non-empty output, falling back from strict JSON mode once on provider errors."""
+    last_error: Exception | None = None
+    for json_mode in (True, False):
+        try:
+            content = _chat_completion(client, messages, json_mode=json_mode)
+            if content.strip():
+                return content
+        except Exception as exc:  # e.g. Groq BadRequest json_validate_failed
+            last_error = exc
+    # Returned to the caller as unparseable output so the schema retry applies.
+    return f"<<no usable output: {type(last_error).__name__ if last_error else 'empty'}>>"
+
+
+def generate_validated(client, messages: list[dict], parser):
+    """Call the model, validate with `parser`, retry exactly once on failure.
+
+    Returns (parsed_result, attempts). Raises GenerationError after the retry fails.
+    """
+    content = _complete(client, messages)
+    try:
+        return parser(content), 1
+    except ValueError:
+        pass
+    retry_messages = messages + [
+        {"role": "assistant", "content": content[:4000]},
+        {"role": "user", "content": SCHEMA_RETRY_INSTRUCTION},
+    ]
+    content = _complete(client, retry_messages)
+    try:
+        return parser(content), 2
+    except ValueError as exc:
+        raise GenerationError("Model output failed schema validation twice") from exc
 
 
 def build_case_prompt(findings: str, report_format: Optional[str] = None) -> str:
@@ -116,40 +241,7 @@ def generate_reports(user_input: str, report_format: Optional[str] = None) -> Re
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": case_text},
     ]
-
-    content = None
-    last_error: Exception | None = None
-    # Attempts 1-2 use strict JSON mode; the final attempt relies on our own parser.
-    for attempt in range(3):
-        kwargs = dict(
-            model=GROQ_MODEL,
-            temperature=0.2,
-            max_completion_tokens=8192,
-            messages=messages,
-        )
-        if "gpt-oss" in GROQ_MODEL:
-            kwargs["reasoning_effort"] = "low"
-        if attempt < 2:
-            kwargs["response_format"] = {"type": "json_object"}
-        try:
-            response = client.chat.completions.create(**kwargs)
-            content = response.choices[0].message.content
-            if content and content.strip():
-                break
-        except Exception as exc:  # BadRequest json_validate_failed etc.
-            last_error = exc
-    if not content or not content.strip():
-        raise RuntimeError(f"Groq returned no usable output: {last_error or 'empty response'}")
-
-    try:
-        result = ReportAlternatives.model_validate(_extract_json(content))
-    except (json.JSONDecodeError, ValidationError) as exc:
-        raise RuntimeError(f"Groq returned an invalid report structure: {exc}") from exc
-
-    expected = ["concise", "standard", "detailed"]
-    actual = [report.type for report in result.reports]
-    if actual != expected:
-        raise RuntimeError(f"Expected reports in order {expected}, got {actual}")
+    result, _attempts = generate_validated(client, messages, parse_generation)
     return result
 
 

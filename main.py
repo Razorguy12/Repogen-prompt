@@ -439,6 +439,10 @@ class PromptSessionResponse(BaseModel):
     reports: list[model.RadiologyReport]
     prompt: str
     report_format: Optional[str] = None
+    exam: Optional[model.ExamInfo] = None   # null for drafts created before prompt v2
+    flags: list[str] = []                   # [] for drafts created before prompt v2
+    prompt_version: Optional[str] = None
+    status: str = "draft"
 
 
 class PromptSessionUpdate(BaseModel):
@@ -464,6 +468,10 @@ def persist_prompt_session(
         "report_format": report_format or "",
         "selected": chosen.type,
         "alternatives": [r.model_dump() for r in alternatives.reports],
+        "exam": alternatives.exam.model_dump(),
+        "flags": alternatives.flags,
+        "prompt_version": model.REPORT_PROMPT_VERSION,
+        "model_id": model.GROQ_MODEL,
     })
     db_report = Report(
         user_id=user.id,
@@ -498,6 +506,11 @@ def session_payload(report: Report) -> dict:
         "reports": alternatives,
         "prompt": params.get("prompt") or "",
         "report_format": params.get("report_format") or "",
+        # Backward compatibility: pre-v2 drafts have neither key.
+        "exam": params.get("exam") or None,
+        "flags": params.get("flags") or [],
+        "prompt_version": params.get("prompt_version"),
+        "status": getattr(report, "status", None) or "draft",
     }
 
 
@@ -530,6 +543,11 @@ async def generate_alternatives(
                         status="FAILED", details={"failure_category": "generation_not_allowed", "workflow": "prompt"},
                         duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
         raise
+    except model.GenerationError:
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
+                        status="FAILED", details={"failure_category": "invalid_model_output", "workflow": "prompt"},
+                        duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
+        raise HTTPException(status_code=502, detail=model.GenerationError.user_message)
     except Exception as e:
         log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
                         status="FAILED", details={"failure_category": "generation_error", "workflow": "prompt"},
