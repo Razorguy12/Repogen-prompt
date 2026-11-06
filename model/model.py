@@ -117,6 +117,19 @@ class GenerationError(RuntimeError):
     )
 
 
+class ProviderBusyError(RuntimeError):
+    """The LLM provider rejected the request for rate or size limits (HTTP 413/429)."""
+
+    user_message = (
+        "The AI service is at its usage limit right now. Nothing was saved. "
+        "Please wait a minute and try again."
+    )
+
+
+def _is_provider_limit(exc: Exception) -> bool:
+    return getattr(exc, "status_code", None) in (413, 429)
+
+
 REPORT_PROMPT_VERSION = "v2"
 SCHEMA_RETRY_INSTRUCTION = (
     "Your previous output was not valid JSON matching the schema. Return valid JSON only."
@@ -172,6 +185,9 @@ def _complete(client, messages: list[dict]) -> str:
             if content.strip():
                 return content
         except Exception as exc:  # e.g. Groq BadRequest json_validate_failed
+            if _is_provider_limit(exc):
+                # Retrying only burns more quota; surface it instead.
+                raise ProviderBusyError(f"Provider limit: HTTP {exc.status_code}") from exc
             last_error = exc
     # Returned to the caller as unparseable output so the schema retry applies.
     return f"<<no usable output: {type(last_error).__name__ if last_error else 'empty'}>>"

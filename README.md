@@ -192,11 +192,23 @@ id | event_type       | user_id | status  | resource_type | resource_id | detail
 
 The GitHub deployment workflow already builds the frontend and restarts `repogen`; it does not own or rewrite the external systemd unit. Confirm that unit's `User`, environment file, and `ReadWritePaths` permit access to the configured directory. The root administrator is bootstrapped only when missing, from `ROOT_ADMIN_USERNAME` / `ROOT_ADMIN_PASSWORD` (plus optional `ROOT_ADMIN_NAME`, `ROOT_ADMIN_EMAIL`) in the environment. No credentials live in the code.
 
-Run the dependency-free audit service tests with:
+## Tests
 
 ```bash
-python -m unittest discover -s tests -v
+# Backend: schema, migrations, finalize/amend, search, comparison, scoping, audit (SQLite by default)
+python -m pytest -q tests
+# Same, against throwaway Postgres databases (exercises triggers and pg_trgm)
+TEST_PG_URL=postgresql://.../empty_db TEST_DATABASE_URL=postgresql://.../another_empty_db python -m pytest -q tests
+
+# Frontend pure logic (filters, IST formatting, word counts)
+cd web && npm test
+
+# Live prompt regression set; calls Groq with synthetic inputs, run manually or in a scheduled CI job
+python scripts/prompt_regression.py            # or: ... bvm cyst
 ```
+
+The v2 system prompt is about 6.7k tokens. On Groq's on-demand tier (8,000 tokens per minute)
+a single generation can exceed the limit; the API then returns 503 with a clear message and nothing is saved.
 
 ## Project layout
 

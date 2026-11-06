@@ -70,3 +70,12 @@ def test_old_draft_payload_has_safe_defaults():
     payload = main.session_payload(legacy)
     assert payload["flags"] == [] and payload["exam"] is None
     main.PromptSessionResponse(**{**payload, "created_at": "2026-01-01T00:00:00Z"})
+
+
+def test_provider_rate_limit_is_not_retried():
+    class Limited(Exception):
+        status_code = 413
+    client = FakeClient([Limited("too large")])
+    with pytest.raises(m.ProviderBusyError):
+        m.generate_validated(client, [{"role": "user", "content": "x"}], m.parse_generation)
+    assert len(client.completions.calls) == 1

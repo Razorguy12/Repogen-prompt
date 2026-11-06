@@ -565,6 +565,11 @@ async def generate_alternatives(
                         status="FAILED", details={"failure_category": "invalid_model_output", "workflow": "prompt"},
                         duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
         raise HTTPException(status_code=502, detail=model.GenerationError.user_message)
+    except model.ProviderBusyError:
+        log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
+                        status="FAILED", details={"failure_category": "provider_rate_limited", "workflow": "prompt"},
+                        duration_ms=int((time.perf_counter() - started) * 1000), resource_type="report")
+        raise HTTPException(status_code=503, detail=model.ProviderBusyError.user_message)
     except Exception as e:
         log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
                         status="FAILED", details={"failure_category": "generation_error", "workflow": "prompt"},

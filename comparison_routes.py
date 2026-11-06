@@ -90,6 +90,11 @@ def _run(db: Session, user: User, request: Request, baseline: FinalReport, follo
                         resource_type="patient", resource_id=baseline.patient_id,
                         details={"failure_category": "invalid_model_output"})
         raise HTTPException(status_code=502, detail=model.GenerationError.user_message)
+    except model.ProviderBusyError:
+        log_audit_event(db, "COMPARISON_GENERATION_FAILED", user_id=user.id, request=request, status="FAILED",
+                        resource_type="patient", resource_id=baseline.patient_id,
+                        details={"failure_category": "provider_rate_limited"})
+        raise HTTPException(status_code=503, detail=model.ProviderBusyError.user_message)
     except Exception:
         log_audit_event(db, "COMPARISON_GENERATION_FAILED", user_id=user.id, request=request, status="FAILED",
                         resource_type="patient", resource_id=baseline.patient_id,
