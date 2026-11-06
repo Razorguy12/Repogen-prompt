@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { apiFetch, apiFetchBlob } from './client'
 import type {
   Comparison, ComparisonListItem, FinalReport, FinalReportSummary, FinalizeRequest, Patient, PatientInput,
 } from '../types/clinical'
@@ -55,3 +55,13 @@ export const regenerateComparison = (id: number) =>
 
 export const getPatientComparisons = (patientId: number) =>
   apiFetch<ComparisonListItem[]>(`/api/patients/${patientId}/comparisons`)
+
+export async function downloadFinalReport(id: number, format: 'pdf' | 'docx'): Promise<void> {
+  const blob = await apiFetchBlob(`/api/final-reports/${id}/export?format=${format}`, { method: 'GET' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `final_report_${id}.${format}`
+  a.click()
+  URL.revokeObjectURL(url)
+}

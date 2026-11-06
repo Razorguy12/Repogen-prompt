@@ -12,6 +12,7 @@ import json
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -121,8 +122,10 @@ def final_report_payload(fr: FinalReport, db: Session, detail: bool = True) -> d
         "updated_at": iso_utc(fr.updated_at),
     }
     if detail:
+        draft = db.get(Report, fr.draft_id)
         data.update({
             "final_text": fr.final_text,
+            "report_format": (_draft_params(draft).get("report_format") or None) if draft else None,
             "final_sections": fr.final_sections,
             "flags": fr.flags or [],
             "flag_acknowledgements": fr.flag_acknowledgements or [],
@@ -402,3 +405,51 @@ def record_export(report_id: int, request: Request, format: Literal["print", "co
     log_audit_event(db, "FINAL_REPORT_EXPORTED", user_id=user.id, request=request, resource_type="final_report",
                     resource_id=fr.id, details={"format": format})
     return None
+
+
+# --------------------------------------------------------------------------- exports
+
+def _ist(value: dt.datetime) -> str:
+    local = value.astimezone(clinical.CLINIC_TZ)
+    return local.strftime("%d %b %Y, ") + local.strftime("%I:%M %p").lstrip("0") + " IST"
+
+
+def _final_export_document(fr: FinalReport, db: Session):
+    from model.report_export import ExportDocument
+    data = final_report_payload(fr, db)
+    p = fr.patient
+    age_label = "Age (mother) / Gender" if fr.exam_region.strip().lower() == "obstetric" else "Age / Gender"
+    status = "Amended version" if fr.status == "amended" else "Final"
+    if data["superseded_by_id"]:
+        status += " (superseded by a newer amendment)"
+    return ExportDocument(
+        title=fr.exam_title,
+        full_report=fr.final_text,
+        report_format=data.get("report_format"),
+        meta=[
+            ("Patient", p.full_name),
+            ("Patient ID", p.patient_identifier or "—"),
+            (age_label, f"{fr.patient_age_at_study} {fr.age_unit} · {p.gender}"),
+            ("Study date", fr.study_date.strftime("%d %b %Y")),
+            ("Status", status),
+        ],
+        footer=f"Finalized by {fr.doctor.name if fr.doctor else 'radiologist'} on {_ist(fr.finalized_at)}.",
+        footer_is_warning=False,
+    )
+
+
+@router.get("/final-reports/{report_id}/export")
+def export_final_report(report_id: int, request: Request, format: Literal["pdf", "docx"] = "pdf",
+                        db: Session = Depends(get_db), user: User = Depends(auth.get_current_user)):
+    from model.model import _temp_path
+    from model.report_export import build_docx, build_pdf
+    fr = _own_final_report(db, user, report_id)
+    doc = _final_export_document(fr, db)
+    path = _temp_path(f".{format}", prefix="final_report_")
+    (build_pdf if format == "pdf" else build_docx)(doc, path)
+    log_audit_event(db, "FINAL_REPORT_EXPORTED", user_id=user.id, request=request, resource_type="final_report",
+                    resource_id=fr.id, details={"format": format})
+    media = "application/pdf" if format == "pdf" else \
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    # File name carries the record ID only, never the patient's name.
+    return FileResponse(path, media_type=media, filename=f"final_report_{fr.id}.{format}")

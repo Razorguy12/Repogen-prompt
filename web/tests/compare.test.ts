@@ -2,7 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { filterReports, intervalDays, orderPair } from '../src/lib/compare.ts'
-import { countBodyWords, formatDateTime, formatStudyDate, parseUtc } from '../src/lib/reportText.ts'
+import { formatDateTime, formatStudyDate, parseUtc } from '../src/lib/reportText.ts'
+import { bodyWordCount } from '../src/lib/reportSections.ts'
 
 const r = (id: number, modality: string, region: string, study_date: string) =>
   ({ id, exam: { modality, region, laterality: 'Not applicable' }, study_date }) as never
@@ -54,5 +55,5 @@ test('around midnight IST the calendar date flips correctly', () => {
 
 test('word count excludes title and headings', () => {
   const text = '## CHEST RADIOGRAPH\n\n**Clinical Details:**\nCough.\n\n**Observations:** Lungs are clear.\n\n### IMPRESSION\nNormal study.'
-  assert.equal(countBodyWords(text), 6)
+  assert.equal(bodyWordCount(text), 6)
 })

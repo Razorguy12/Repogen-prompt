@@ -17,11 +17,12 @@ import { FinalizeModal } from '../components/FinalizeModal'
 import { copyText } from '../lib/clipboard'
 import type { PromptSession, ReportAlternative, ReportSummary } from '../types'
 import { ApiError } from '../api/client'
-import { MarkdownReport } from '../components/MarkdownReport'
+import { ReportDocument } from '../components/ReportDocument'
+import { bodyWordCount } from '../lib/reportSections'
 import { FlagsPanel } from '../components/FlagsPanel'
 import { ExamChip } from '../components/ExamChip'
 import { InputTips } from '../components/InputTips'
-import { countBodyWords, displayRange, parseUtc } from '../lib/reportText'
+import { displayRange, parseUtc } from '../lib/reportText'
 import '../prompt.css'
 
 const examples = [
@@ -418,7 +419,7 @@ export default function PromptGeneratePage() {
                       <div>
                         <h3>{current.title}</h3>
                         <span>
-                          {countBodyWords(current.full_report)} words · target {displayRange(current.word_limit)} · {session.selected === current.type ? 'Selected' : 'Preview'}
+                          {bodyWordCount(current.full_report, current.title, session.report_format)} words · target {displayRange(current.word_limit)} · {session.selected === current.type ? 'Selected' : 'Preview'}
                         </span>
                       </div>
                       <div className="sheet-actions">
@@ -435,7 +436,7 @@ export default function PromptGeneratePage() {
                         <button type="button" className="accent" onClick={saveEdits}>Save edits to this draft</button>
                       </div>
                     ) : (
-                      <MarkdownReport className="report-markdown px-1 py-2" text={current.full_report} />
+                      <div className="px-1 py-1"><ReportDocument text={current.full_report} title={current.title} reportFormat={session.report_format} /></div>
                     )}
 
                     <footer>
@@ -529,6 +530,7 @@ export default function PromptGeneratePage() {
         <FinalizeModal
           draftId={session.id}
           variant={current}
+          reportFormat={session.report_format}
           exam={session.exam}
           flagAcks={acks}
           onClose={() => setFinalizeOpen(false)}

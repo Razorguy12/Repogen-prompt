@@ -14,17 +14,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
 
-from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt, RGBColor
 from dotenv import load_dotenv
 from groq import Groq
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from xml.sax.saxutils import escape
 
 load_dotenv()
@@ -281,136 +273,42 @@ def _temp_path(suffix: str, prefix: str = "radiology_report_") -> str:
     return path
 
 
-def report_to_docx(report: RadiologyReport, filename: Optional[str] = None) -> str:
-    """Export one alternative as a Word document the radiologist can open and edit."""
+DRAFT_DISCLAIMER = (
+    "AI-GENERATED DRAFT — NOT FOR CLINICAL USE UNTIL REVIEWED. This report has not been reviewed or approved "
+    "by a physician and must be independently verified against the source study and signed off by a "
+    "board-certified radiologist or licensed physician."
+)
+
+
+def _draft_export(report: RadiologyReport, report_format: Optional[str]):
+    from model.report_export import ExportDocument
+    return ExportDocument(
+        title=report.title or "RADIOLOGY REPORT",
+        full_report=report.full_report or "",
+        report_format=report_format,
+        meta=[("Report option", report.type.title()), ("Word target", f"{report.word_limit} words")],
+        footer=DRAFT_DISCLAIMER,
+    )
+
+
+def report_to_docx(report: RadiologyReport, filename: Optional[str] = None,
+                   report_format: Optional[str] = None) -> str:
+    """Export one alternative as an editable Word document in the on-screen style."""
+    from model.report_export import build_docx
     if filename is None:
         safe_type = re.sub(r"[^a-z0-9]+", "_", report.type.lower())
         filename = _temp_path(".docx", prefix=f"radiology_report_{safe_type}_")
-
-    doc = Document()
-    for section in doc.sections:
-        section.top_margin = Inches(0.8)
-        section.bottom_margin = Inches(0.8)
-        section.left_margin = Inches(1.0)
-        section.right_margin = Inches(1.0)
-
-    title = doc.add_paragraph(report.title or "RADIOLOGY REPORT")
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title.runs[0].bold = True
-    title.runs[0].font.size = Pt(16)
-    title.runs[0].font.color.rgb = RGBColor(0x0F, 0x3D, 0x3E)
-
-    meta = doc.add_paragraph()
-    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = meta.add_run(f"Draft option: {report.type.title()}  ·  Target length: {report.word_limit} words")
-    run.italic = True
-    run.font.size = Pt(9)
-    run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
-
-    sections = [
-        ("Clinical Details", report.clinical_details),
-        ("Protocol", report.protocol),
-        ("Observations", report.observations),
-        ("Impression", report.impression),
-    ]
-    # Prefer the full composed document when a custom format was used.
-    body = (report.full_report or "").strip()
-    if body and not all(heading.lower() in body.lower() for heading, _ in sections):
-        for paragraph in body.split("\n"):
-            p = doc.add_paragraph(paragraph)
-            p.paragraph_format.space_after = Pt(6)
-            if p.runs:
-                p.runs[0].font.size = Pt(11)
-    else:
-        for heading, value in sections:
-            h = doc.add_paragraph(heading.upper())
-            h.runs[0].bold = True
-            h.runs[0].font.size = Pt(11)
-            h.runs[0].font.color.rgb = RGBColor(0x0F, 0x3D, 0x3E)
-            h.paragraph_format.space_before = Pt(12)
-            for line in (value or "").split("\n"):
-                p = doc.add_paragraph(line)
-                p.paragraph_format.space_after = Pt(4)
-                if p.runs:
-                    p.runs[0].font.size = Pt(11)
-
-    note = doc.add_paragraph()
-    note.paragraph_format.space_before = Pt(18)
-    run = note.add_run(
-        "AI-GENERATED DRAFT — NOT FOR CLINICAL USE UNTIL REVIEWED. This report has not been reviewed or approved by a physician and must be independently verified against the source study and signed off by a board-certified radiologist or licensed physician. "
-        "This document is intended for editing in Microsoft Word."
-    )
-    run.italic = True
-    run.font.size = Pt(8)
-    run.font.color.rgb = RGBColor(0x92, 0x40, 0x0E)
-
-    doc.save(filename)
-    return str(filename)
+    return build_docx(_draft_export(report, report_format), str(filename))
 
 
-def report_to_pdf(report: RadiologyReport, filename: Optional[str] = None) -> str:
-    """Export one alternative as a PDF; pass a report from result.reports."""
+def report_to_pdf(report: RadiologyReport, filename: Optional[str] = None,
+                  report_format: Optional[str] = None) -> str:
+    """Export one alternative as a PDF in the on-screen style; pass a report from result.reports."""
+    from model.report_export import build_pdf
     if filename is None:
         safe_type = re.sub(r"[^a-z0-9]+", "_", report.type.lower())
         filename = _temp_path(".pdf", prefix=f"radiology_report_{safe_type}_")
-
-    doc = SimpleDocTemplate(
-        filename, pagesize=letter,
-        rightMargin=0.65 * inch, leftMargin=0.65 * inch,
-        topMargin=0.6 * inch, bottomMargin=0.6 * inch,
-    )
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "ReportTitle", parent=styles["Title"], fontSize=16,
-        leading=20, textColor=colors.HexColor("#174f40"), spaceAfter=14,
-    )
-    heading_style = ParagraphStyle(
-        "ReportHeading", parent=styles["Heading3"], fontSize=10,
-        leading=13, textColor=colors.HexColor("#174f40"),
-        spaceBefore=10, spaceAfter=5,
-    )
-    body_style = ParagraphStyle(
-        "ReportBody", parent=styles["BodyText"], fontSize=9.5,
-        leading=14, spaceAfter=7,
-    )
-    label_style = ParagraphStyle(
-        "Label", parent=body_style, fontName="Helvetica-Bold", fontSize=9,
-    )
-
-    story = [Paragraph(sanitize_pdf_text(report.title or "RADIOLOGY REPORT"), title_style)]
-    details = [
-        [Paragraph("Report option", label_style), Paragraph(sanitize_pdf_text(report.type.title()), body_style)],
-        [Paragraph("Word target", label_style), Paragraph(sanitize_pdf_text(report.word_limit), body_style)],
-    ]
-    table = Table(details, colWidths=[1.35 * inch, 5.2 * inch])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#eaf3ed")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d5dfd7")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 7),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-    story += [table, Spacer(1, 12)]
-
-    sections = [
-        ("CLINICAL DETAILS", report.clinical_details),
-        ("PROTOCOL", report.protocol),
-        ("OBSERVATIONS", report.observations),
-        ("IMPRESSION", report.impression),
-    ]
-    for heading, value in sections:
-        story.append(Paragraph(heading, heading_style))
-        story.append(Paragraph(sanitize_pdf_text(value), body_style))
-
-    story += [Spacer(1, 18), Paragraph(
-        "AI-GENERATED DRAFT — NOT FOR CLINICAL USE UNTIL REVIEWED. This report has not been reviewed or approved by a physician and must be independently verified against the source study and signed off by a board-certified radiologist or licensed physician.",
-        ParagraphStyle("Disclaimer", parent=styles["Italic"], fontSize=8,
-                       textColor=colors.HexColor("#777777")),
-    )]
-    doc.build(story)
-    return str(filename)
+    return build_pdf(_draft_export(report, report_format), str(filename))
 
 
 def alternatives_to_pdfs(alternatives: ReportAlternatives, output_dir: str = ".") -> list[str]:

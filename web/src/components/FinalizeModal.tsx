@@ -7,7 +7,7 @@ import { LATERALITIES, MODALITIES, type ExamInfo, type ReportAlternative } from 
 import {
   AGE_UNITS, GENDERS, type AgeUnit, type DuplicateDetail, type FinalReport, type Gender, type Patient,
 } from '../types/clinical'
-import { MarkdownReport } from './MarkdownReport'
+import { ReportDocument } from './ReportDocument'
 import { PatientSearch } from './PatientSearch'
 
 type Step = 1 | 2 | 3
@@ -15,6 +15,7 @@ type Step = 1 | 2 | 3
 interface Props {
   draftId: number
   variant: ReportAlternative
+  reportFormat?: string
   exam: ExamInfo | null | undefined
   flagAcks: Record<number, string>
   onClose: () => void
@@ -50,7 +51,7 @@ function Segmented<T extends string>({ value, options, onChange, disabled }: {
   )
 }
 
-export function FinalizeModal({ draftId, variant, exam, flagAcks, onClose, onFinalized }: Props) {
+export function FinalizeModal({ draftId, variant, reportFormat, exam, flagAcks, onClose, onFinalized }: Props) {
   const [step, setStep] = useState<Step>(1)
   const [busy, setBusy] = useState(false)
 
@@ -338,7 +339,7 @@ export function FinalizeModal({ draftId, variant, exam, flagAcks, onClose, onFin
                   <div><span className="block text-xs text-slate-500">{isObstetric ? 'Age (mother) / Gender' : 'Age / Gender'}</span>{ageNumber} {ageUnit} · {gender}</div>
                   <div><span className="block text-xs text-slate-500">Study date</span>{formatStudyDate(studyDate)}</div>
                 </div>
-                <MarkdownReport text={variant.full_report} />
+                <ReportDocument text={variant.full_report} title={variant.title} reportFormat={reportFormat} showTitle />
               </div>
               <label className="flex items-start gap-2 text-sm cursor-pointer">
                 <input type="checkbox" className="mt-1" checked={approved} onChange={(e) => setApproved(e.target.checked)} />

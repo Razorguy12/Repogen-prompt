@@ -1,0 +1,165 @@
+[
+  {
+    "name": "default markdown structure",
+    "title": "CT BRAIN PLAIN",
+    "report_format": "",
+    "full_report": "## CT BRAIN PLAIN\n\n**Clinical Details:**\nHeadache for 2 weeks.\n\n**Protocol:**\nAxial non-contrast CT.\n\n**Observations:**\nA 3.4 x 2.3 cm extra-axial lesion.\nNo midline shift.\n\n### IMPRESSION\n\nLikely meningioma.",
+    "expected": {
+      "title": "CT BRAIN PLAIN",
+      "sections": [
+        [
+          "Clinical Details",
+          "Headache for 2 weeks."
+        ],
+        [
+          "Protocol",
+          "Axial non-contrast CT."
+        ],
+        [
+          "Observations",
+          "A 3.4 x 2.3 cm extra-axial lesion.\nNo midline shift."
+        ],
+        [
+          "IMPRESSION",
+          "Likely meningioma."
+        ]
+      ],
+      "impression": [
+        false,
+        false,
+        false,
+        true
+      ]
+    }
+  },
+  {
+    "name": "plain custom format (screenshot case)",
+    "title": "CT BRAIN PLAIN",
+    "report_format": "Title\nClinical Details\nProtocol\nObservations\nImpression",
+    "full_report": "CT BRAIN PLAIN\nClinical Details\nPatient presents with headache.\nProtocol\nAxial non-contrast CT of the brain.\nObservations\nWell-defined extra-axial mass.\nImpression\nMost compatible with a meningioma.",
+    "expected": {
+      "title": "CT BRAIN PLAIN",
+      "sections": [
+        [
+          "Clinical Details",
+          "Patient presents with headache."
+        ],
+        [
+          "Protocol",
+          "Axial non-contrast CT of the brain."
+        ],
+        [
+          "Observations",
+          "Well-defined extra-axial mass."
+        ],
+        [
+          "Impression",
+          "Most compatible with a meningioma."
+        ]
+      ],
+      "impression": [
+        false,
+        false,
+        false,
+        true
+      ]
+    }
+  },
+  {
+    "name": "inline labels and bold label with text",
+    "title": "CHEST X-RAY PA",
+    "report_format": "Study\nClinical history\nFindings\nImpression",
+    "full_report": "**CHEST X-RAY PA**\nStudy: Chest radiograph, PA view.\nClinical history: Fever and cough.\n**Findings:** Right lower zone opacity.\nBlunted right costophrenic angle.\nImpression:\n1. Right lower zone consolidation.\n2. Small right effusion.",
+    "expected": {
+      "title": "CHEST X-RAY PA",
+      "sections": [
+        [
+          "Study",
+          "Chest radiograph, PA view."
+        ],
+        [
+          "Clinical history",
+          "Fever and cough."
+        ],
+        [
+          "Findings",
+          "Right lower zone opacity.\nBlunted right costophrenic angle."
+        ],
+        [
+          "Impression",
+          "1. Right lower zone consolidation.\n2. Small right effusion."
+        ]
+      ],
+      "impression": [
+        false,
+        false,
+        false,
+        true
+      ]
+    }
+  },
+  {
+    "name": "organ-wise custom format",
+    "title": "ULTRASOUND ABDOMEN",
+    "report_format": "Organ-wise: Liver, Gallbladder, Pancreas, Spleen, Kidneys, Impression",
+    "full_report": "## ULTRASOUND ABDOMEN\nLiver\nNormal size and echotexture.\nGallbladder\n12 mm calculus. No wall thickening.\nImpression\nCholelithiasis.",
+    "expected": {
+      "title": "ULTRASOUND ABDOMEN",
+      "sections": [
+        [
+          "Liver",
+          "Normal size and echotexture."
+        ],
+        [
+          "Gallbladder",
+          "12 mm calculus. No wall thickening."
+        ],
+        [
+          "Impression",
+          "Cholelithiasis."
+        ]
+      ],
+      "impression": [
+        false,
+        false,
+        true
+      ]
+    }
+  },
+  {
+    "name": "no headings at all",
+    "title": "REPORT",
+    "report_format": "",
+    "full_report": "Lungs are clear.\nHeart size normal.",
+    "expected": {
+      "title": "REPORT",
+      "sections": [
+        [
+          null,
+          "Lungs are clear.\nHeart size normal."
+        ]
+      ],
+      "impression": [
+        false
+      ]
+    }
+  },
+  {
+    "name": "sentence that starts like a label is not a heading",
+    "title": "CT ABDOMEN",
+    "report_format": "",
+    "full_report": "## CT ABDOMEN\n**Observations:**\nThe liver note: no focal lesion. Spleen normal.",
+    "expected": {
+      "title": "CT ABDOMEN",
+      "sections": [
+        [
+          "Observations",
+          "The liver note: no focal lesion. Spleen normal."
+        ]
+      ],
+      "impression": [
+        false
+      ]
+    }
+  }
+]

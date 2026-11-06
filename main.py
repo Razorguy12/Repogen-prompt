@@ -626,13 +626,23 @@ async def update_prompt_draft(
     return session_payload(report)
 
 
+def draft_report_format(draft: Report) -> Optional[str]:
+    try:
+        return (json.loads(draft.input_params or "{}") or {}).get("report_format") or None
+    except json.JSONDecodeError:
+        return None
+
+
 @app.post("/api/alternative-pdf")
 async def alternative_pdf(report: model.RadiologyReport, request: Request, report_id: int | None = None,
                           current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     try:
+        report_format = None
         if report_id is not None:
-            check_report_access(get_report_or_404(report_id, db), current_user)
-        pdf_filename = model.report_to_pdf(report)
+            draft = get_report_or_404(report_id, db)
+            check_report_access(draft, current_user)
+            report_format = draft_report_format(draft)
+        pdf_filename = model.report_to_pdf(report, report_format=report_format)
         log_audit_event(db, "REPORT_DOWNLOADED", user_id=current_user.id, request=request,
                         resource_type="report" if report_id is not None else "report_export",
                         resource_id=report_id, details={"format": "pdf", "workflow": "alternative"})
@@ -647,9 +657,12 @@ async def alternative_pdf(report: model.RadiologyReport, request: Request, repor
 async def alternative_docx(report: model.RadiologyReport, request: Request, report_id: int | None = None,
                            current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     try:
+        report_format = None
         if report_id is not None:
-            check_report_access(get_report_or_404(report_id, db), current_user)
-        filename = model.report_to_docx(report)
+            draft = get_report_or_404(report_id, db)
+            check_report_access(draft, current_user)
+            report_format = draft_report_format(draft)
+        filename = model.report_to_docx(report, report_format=report_format)
         log_audit_event(db, "REPORT_DOWNLOADED", user_id=current_user.id, request=request,
                         resource_type="report" if report_id is not None else "report_export",
                         resource_id=report_id, details={"format": "docx", "workflow": "alternative"})
@@ -731,9 +744,12 @@ async def generate_report_with_pdf(request: ReportRequest, http_request: Request
 async def create_pdf_from_report(report: model.RadiologyReport, request: Request, report_id: int | None = None,
                                  current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     try:
+        report_format = None
         if report_id is not None:
-            check_report_access(get_report_or_404(report_id, db), current_user)
-        pdf_filename = model.report_to_pdf(report)
+            draft = get_report_or_404(report_id, db)
+            check_report_access(draft, current_user)
+            report_format = draft_report_format(draft)
+        pdf_filename = model.report_to_pdf(report, report_format=report_format)
         log_audit_event(db, "REPORT_DOWNLOADED", user_id=current_user.id, request=request,
                         resource_type="report" if report_id is not None else "report_export",
                         resource_id=report_id, details={"format": "pdf"})

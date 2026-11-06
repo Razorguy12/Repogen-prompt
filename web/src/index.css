@@ -71,3 +71,37 @@ body {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* Report document: same look on screen, in print, and mirrored in PDF/DOCX exports. */
+.report-doc-title {
+  margin: 0 0 0.6rem;
+  font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+.report-doc section { padding: 0.9rem 0 0.2rem; border-top: 1px solid #f1f5f9; }
+.report-doc section:first-of-type { border-top: 0; }
+.report-doc h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+.report-doc p { margin: 0 0 0.35rem; line-height: 1.7; color: #1e293b; }
+.report-doc ul, .report-doc ol { margin: 0.2rem 0 0.4rem; padding-left: 1.4rem; line-height: 1.7; color: #1e293b; }
+.report-doc ul { list-style: disc; }
+.report-doc ol { list-style: decimal; }
+.report-doc .impression {
+  background: #f8fafc;
+  margin: 0.8rem -0.2rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  border: 0;
+}
+@media print {
+  .report-doc .impression { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .report-doc h4 { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

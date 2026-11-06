@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { AppHeader } from '../components/AppHeader'
 import { FlagsPanel } from '../components/FlagsPanel'
-import { MarkdownReport } from '../components/MarkdownReport'
+import { ReportDocument } from '../components/ReportDocument'
 import { PatientHeader } from './FinalReportPage'
 import { getComparison, regenerateComparison, saveComparison } from '../api/clinical'
 import { ApiError } from '../api/client'
@@ -215,7 +215,7 @@ export default function ComparisonPage() {
                     <div className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
                       {label} · {formatStudyDate(fr.study_date)}
                     </div>
-                    <MarkdownReport text={fr.final_text} />
+                    <ReportDocument text={fr.final_text} title={fr.exam_title} reportFormat={fr.report_format} showTitle />
                   </div>
                 ))}
               </div>

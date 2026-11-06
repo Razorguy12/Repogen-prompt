@@ -43,6 +43,8 @@ export interface FinalReportSummary {
 
 export interface FinalReport extends FinalReportSummary {
   final_text: string
+  /** House format used when the draft was generated; helps detect custom headings. */
+  report_format?: string | null
   final_sections: Record<string, string> | null
   flags: string[]
   flag_acknowledgements: { flag: string; acknowledged_at: string }[]

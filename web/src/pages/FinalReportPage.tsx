@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { AppHeader } from '../components/AppHeader'
-import { MarkdownReport } from '../components/MarkdownReport'
-import { amendFinalReport, getFinalReport, recordFinalReportExport } from '../api/clinical'
+import { ReportDocument } from '../components/ReportDocument'
+import { amendFinalReport, downloadFinalReport, getFinalReport, recordFinalReportExport } from '../api/clinical'
 import { ApiError } from '../api/client'
 import { copyText } from '../lib/clipboard'
 import { formatDateTime, formatStudyDate } from '../lib/reportText'
@@ -119,7 +119,11 @@ export default function FinalReportPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn btn-secondary py-2 px-3 text-sm" onClick={copy}>Copy</button>
-            <button type="button" className="btn btn-secondary py-2 px-3 text-sm" onClick={print}>Print / PDF</button>
+            <button type="button" className="btn btn-secondary py-2 px-3 text-sm" onClick={print}>Print</button>
+            <button type="button" className="btn btn-secondary py-2 px-3 text-sm"
+              onClick={() => downloadFinalReport(report.id, 'pdf').catch(() => toast.error('PDF download failed'))}>PDF</button>
+            <button type="button" className="btn btn-secondary py-2 px-3 text-sm"
+              onClick={() => downloadFinalReport(report.id, 'docx').catch(() => toast.error('Word download failed'))}>Word</button>
             {!superseded && (
               <button type="button" className="btn btn-secondary py-2 px-3 text-sm" onClick={() => { setAmendText(report.final_text); setAmending(true) }}>
                 Add amendment
@@ -133,7 +137,7 @@ export default function FinalReportPage() {
 
         <article className="glass-panel p-6 sm:p-8 print:shadow-none print:border-0 print:bg-white">
           <PatientHeader report={report} />
-          <MarkdownReport text={report.final_text} />
+          <ReportDocument text={report.final_text} title={report.exam_title} reportFormat={report.report_format} showTitle />
           <p className="mt-6 pt-4 border-t border-slate-200 text-sm text-slate-600 mb-0">
             Finalized by {report.doctor_name ?? 'radiologist'} on {formatDateTime(report.finalized_at)}
             {report.status === 'amended' && ' (amendment)'}
