@@ -139,7 +139,7 @@ See `.env.example` for the configuration template.
 
 ## Audit logs and EC2 operations
 
-Audit records are stored in PostgreSQL's `audit_events` table and written independently to a rotating JSONL file. The application creates the new table idempotently as part of its existing SQLAlchemy startup migration. It does not expose audit mutation or deletion endpoints. Event metadata is limited to activity identifiers and operational context; report bodies, patient identifiers, credentials, and tokens are excluded.
+Audit records are stored in PostgreSQL's `audit_events` table and written independently to a rotating JSONL file. Schema changes are Alembic migrations in `alembic/versions/`; they are applied by `python migrate.py` during deploy and, as a safety net, at app startup under a Postgres advisory lock. It does not expose audit mutation or deletion endpoints. Event metadata is limited to activity identifiers and operational context; report bodies, patient identifiers, credentials, and tokens are excluded.
 
 Before deploying, back up the database and configure the service account to write to the log directory. Use the actual account and paths from the EC2 systemd unit:
 
@@ -155,7 +155,8 @@ Run the schema migration and restart the service from the repository checkout:
 
 ```bash
 source .venv/bin/activate
-python migrate.py
+python migrate.py          # alembic upgrade head
+# roll back one revision if needed:  alembic downgrade -1
 sudo systemctl restart repogen
 sudo systemctl is-active repogen
 curl --fail http://127.0.0.1:8000/api/health
@@ -189,7 +190,7 @@ id | event_type       | user_id | status  | resource_type | resource_id | detail
 42 | REPORT_GENERATED | 104     | SUCCESS | report        | 812         | {"workflow":"prompt","variants":3}
 ```
 
-The GitHub deployment workflow already builds the frontend and restarts `repogen`; it does not own or rewrite the external systemd unit. Confirm that unit's `User`, environment file, and `ReadWritePaths` permit access to the configured directory. `main.py` currently includes an automatic bootstrap administrator with a hardcoded initial password; rotate/remove that bootstrap credential through a separately reviewed deployment change before exposing a new installation.
+The GitHub deployment workflow already builds the frontend and restarts `repogen`; it does not own or rewrite the external systemd unit. Confirm that unit's `User`, environment file, and `ReadWritePaths` permit access to the configured directory. The root administrator is bootstrapped only when missing, from `ROOT_ADMIN_USERNAME` / `ROOT_ADMIN_PASSWORD` (plus optional `ROOT_ADMIN_NAME`, `ROOT_ADMIN_EMAIL`) in the environment. No credentials live in the code.
 
 Run the dependency-free audit service tests with:
 

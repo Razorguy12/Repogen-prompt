@@ -1,7 +1,6 @@
-"""Run the application's idempotent schema migrations."""
-from database import Base, engine, run_migrations
+"""Apply database migrations. Equivalent to `alembic upgrade head`."""
+from database import upgrade_schema
 
 if __name__ == "__main__":
-    Base.metadata.create_all(bind=engine)
-    run_migrations(engine)
+    upgrade_schema()
     print("Database schema is up to date")

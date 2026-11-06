@@ -16,7 +16,7 @@ import pdfplumber
 import model.model as model
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_, desc, asc
-from database import engine, Base, get_db, User, Report, AuditEvent, run_migrations
+from database import engine, Base, get_db, User, Report, AuditEvent, upgrade_schema
 import auth
 from audit_service import log_audit_event, csv_safe_cell
 import csv
@@ -27,9 +27,8 @@ import threading
 from time import monotonic
 from datetime import timezone
 
-# Create DB tables and apply column migrations for existing databases
-Base.metadata.create_all(bind=engine)
-run_migrations(engine)
+# Bring the schema up to date (Alembic; idempotent, lock-protected).
+upgrade_schema(engine)
 
 # Load environment variables
 load_dotenv()

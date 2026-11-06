@@ -98,68 +98,28 @@ def get_db():
         db.close()
 
 
-def run_migrations(db_engine):
-    """Add new columns to existing tables if missing."""
-    is_sqlite = db_engine.dialect.name == "sqlite"
-    timestamp_type = "DATETIME" if is_sqlite else "TIMESTAMP"
+MIGRATION_LOCK_ID = 724_001  # arbitrary constant for pg_advisory_xact_lock
 
-    new_columns = [
-        ("status", f"VARCHAR DEFAULT 'draft'"),
-        ("updated_at", timestamp_type),
-        ("input_params", "TEXT"),
-        ("scan_image", "TEXT"),
-        ("scan_image_name", "VARCHAR"),
-    ]
 
-    with db_engine.connect() as conn:
-        if is_sqlite:
-            existing = {
-                row[1]
-                for row in conn.execute(text("PRAGMA table_info(reports)")).fetchall()
-            }
-        else:
-            rows = conn.execute(
-                text(
-                    "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_name = 'reports'"
-                )
-            ).fetchall()
-            existing = {row[0] for row in rows}
+def upgrade_schema(db_engine=None):
+    """Apply Alembic migrations up to head.
 
-        for col_name, col_type in new_columns:
-            if col_name in existing:
-                continue
-            conn.execute(text(f"ALTER TABLE reports ADD COLUMN {col_name} {col_type}"))
-            if col_name == "updated_at":
-                conn.execute(
-                    text(
-                        f"UPDATE reports SET updated_at = created_at "
-                        f"WHERE updated_at IS NULL"
-                    )
-                )
-        conn.commit()
+    Safe to call from every worker on startup: on Postgres an advisory lock
+    serialises concurrent callers, and Alembic skips revisions already applied.
+    """
+    from pathlib import Path
+    from alembic import command
+    from alembic.config import Config
 
-    # Idempotent migration for the audit table and its lookup indexes. The
-    # table is intentionally retained when users are deleted (user_id SET NULL).
-    AuditEvent.__table__.create(bind=db_engine, checkfirst=True)
+    db_engine = db_engine or engine
+    cfg = Config(str(Path(__file__).with_name("alembic.ini")))
+    with db_engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": MIGRATION_LOCK_ID})
+        cfg.attributes["connection"] = conn
+        command.upgrade(cfg, "head")
 
-    with db_engine.connect() as conn:
-        if is_sqlite:
-            user_columns = {
-                row[1]
-                for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()
-            }
-        else:
-            rows = conn.execute(
-                text(
-                    "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_name = 'users'"
-                )
-            ).fetchall()
-            user_columns = {row[0] for row in rows}
 
-        if "is_locked" not in user_columns:
-            conn.execute(text("ALTER TABLE users ADD COLUMN is_locked BOOLEAN NOT NULL DEFAULT FALSE"))
-        if "report_quota_start" not in user_columns:
-            conn.execute(text("ALTER TABLE users ADD COLUMN report_quota_start INTEGER NOT NULL DEFAULT 0"))
-        conn.commit()
+def run_migrations(db_engine=None):
+    """Backward-compatible alias; schema changes now live in alembic/versions."""
+    upgrade_schema(db_engine)
