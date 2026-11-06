@@ -3,6 +3,7 @@ import type { RadiologyReport, ReportSummary } from '../types'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ScanModal } from './ScanModal'
+import { formatStudyDate } from '../lib/reportText'
 
 interface ReportCardProps {
   report: ReportSummary
@@ -20,7 +21,9 @@ export function ReportCard({ report }: ReportCardProps) {
   const structured = isStructured(report.report_data) ? report.report_data : null
   const scanImg = report.scan_image || structured?.scan_image
   const scanImgName = report.scan_image_name || structured?.scan_image_name
-  const href = report.kind === 'prompt' || report.input_params?.alternatives ? `/generate?id=${report.id}` : `/reports/${report.id}`
+  const final = report.final_report
+  const draftHref = report.kind === 'prompt' || report.input_params?.alternatives ? `/generate?id=${report.id}` : `/reports/${report.id}`
+  const href = final ? `/final/${final.id}` : draftHref
 
   return (
     <>
@@ -41,15 +44,25 @@ export function ReportCard({ report }: ReportCardProps) {
                 to={href}
                 className="text-base sm:text-lg font-semibold text-primary-dark no-underline hover:underline truncate"
               >
-                {report.patient_name}
+                {final ? final.patient_name : report.patient_name}
               </Link>
               <span className={report.status === 'final' ? 'badge-final shrink-0' : 'badge-draft shrink-0'}>
-                {report.status}
+                {final?.status === 'amended' ? 'amended' : report.status}
               </span>
             </div>
-            <div className="text-xs sm:text-sm text-slate-500 mb-3">
-              ID: <strong>{report.patient_id}</strong>
-            </div>
+            {final ? (
+              <div className="text-xs sm:text-sm text-slate-500 mb-3 space-y-0.5">
+                <div className="truncate">{final.exam_title}</div>
+                <div>
+                  {final.patient_identifier ? <>ID: <strong>{final.patient_identifier}</strong> · </> : null}
+                  Study {formatStudyDate(final.study_date)}
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs sm:text-sm text-slate-500 mb-3">
+                ID: <strong>{report.patient_id}</strong>
+              </div>
+            )}
           </div>
 
           <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">

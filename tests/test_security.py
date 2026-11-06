@@ -26,7 +26,7 @@ def test_generated_draft_stores_v2_metadata(monkeypatch):
     _, h = make_user()
     body = client.post("/api/generate-alternatives", json={"prompt": "CXR - clear"}, headers=h).json()
     assert body["flags"] == ["Check side"] and body["exam"]["modality"] == "XR"
-    assert body["prompt_version"] == "v2" and body["created_at"].endswith("Z")
+    assert body["prompt_version"] == "v2+trim" and body["created_at"].endswith("Z")
 
 
 def test_generation_failure_returns_clear_error_and_saves_nothing(monkeypatch):

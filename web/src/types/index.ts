@@ -68,6 +68,18 @@ export interface ReportSummary {
   input_params?: (Partial<ReportInputParams> & PromptInputParams) | null
   scan_image?: string | null
   scan_image_name?: string | null
+  /** Current signed version and its patient, when this draft has been finalized. */
+  final_report?: FinalSummary | null
+}
+
+export interface FinalSummary {
+  id: number
+  status: 'final' | 'amended'
+  patient_id: number
+  patient_name: string
+  patient_identifier: string | null
+  exam_title: string
+  study_date: string
 }
 
 export interface PromptSession {

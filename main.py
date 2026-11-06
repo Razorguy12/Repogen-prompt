@@ -486,7 +486,7 @@ def persist_prompt_session(
         "alternatives": [r.model_dump() for r in alternatives.reports],
         "exam": alternatives.exam.model_dump(),
         "flags": alternatives.flags,
-        "prompt_version": model.REPORT_PROMPT_VERSION,
+        "prompt_version": model.current_prompt_version(),
         "model_id": model.GROQ_MODEL,
     })
     db_report = Report(
@@ -811,7 +811,14 @@ async def transcribe_audio(file: UploadFile = File(...), current_user: User = De
 @app.get("/api/reports")
 async def get_my_reports(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     reports = db.query(Report).filter(Report.user_id == current_user.id).order_by(Report.created_at.desc()).all()
-    return [serialize_report(r) for r in reports]
+    finals = clinical_routes.latest_finals_for_drafts(db, current_user.id, [r.id for r in reports])
+    out = []
+    for r in reports:
+        item = serialize_report(r)
+        # Doctor's own list only (never the admin view): the signed version and its patient.
+        item["final_report"] = finals.get(r.id)
+        out.append(item)
+    return out
 
 @app.get("/api/reports/{report_id}")
 async def get_report(report_id: int, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):

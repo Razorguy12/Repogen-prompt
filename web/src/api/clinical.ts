@@ -27,8 +27,8 @@ export const finalizeDraft = (draftId: number, body: FinalizeRequest) =>
 export const getFinalReportForDraft = (draftId: number) =>
   apiFetch<{ id: number }>(`/api/final-reports/by-draft/${draftId}`)
 
-export const getRecentFinalReports = (limit = 10) =>
-  apiFetch<FinalReportSummary[]>(`/api/final-reports?limit=${limit}`)
+export const getRecentFinalReports = (limit = 10, q = '') =>
+  apiFetch<FinalReportSummary[]>(`/api/final-reports?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`)
 
 export const getFinalReport = (id: number) => apiFetch<FinalReport>(`/api/final-reports/${id}`)
 

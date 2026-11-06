@@ -1,18 +1,20 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AppHeader } from '../components/AppHeader'
 import { ReportCard } from '../components/ReportCard'
 import { SkeletonCard } from '../components/LoadingOverlay'
 import { useAuth } from '../context/AuthContext'
 import { getReports, getDashboardStats } from '../api/reports'
-import { getRecentFinalReports } from '../api/clinical'
-import { formatStudyDate, parseUtc } from '../lib/reportText'
+import { FinalReportsPanel } from '../components/FinalReportsPanel'
+import { parseUtc } from '../lib/reportText'
 
 export default function DashboardPage() {
   const { name, token } = useAuth()
   const [search, setSearch] = useState('')
   const [modalityFilter, setModalityFilter] = useState<string | null>(null)
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') === 'final' ? 'final' : 'all'
 
   const { data: reports = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ['reports', token],
@@ -23,12 +25,6 @@ export default function DashboardPage() {
   const { data: stats } = useQuery({
     queryKey: ['dashboard-stats', token],
     queryFn: getDashboardStats,
-    enabled: !!token,
-  })
-
-  const { data: recentFinals = [] } = useQuery({
-    queryKey: ['recent-final-reports', token],
-    queryFn: () => getRecentFinalReports(10),
     enabled: !!token,
   })
 
@@ -47,7 +43,10 @@ export default function DashboardPage() {
         date.toLocaleDateString(),
         date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }),
       ].join(' ').toLowerCase()
-      const matchesSearch = !term || modality.includes(term) || dateText.includes(term)
+      const patientText = r.final_report
+        ? `${r.final_report.patient_name} ${r.final_report.patient_identifier ?? ''} ${r.final_report.exam_title}`.toLowerCase()
+        : ''
+      const matchesSearch = !term || modality.includes(term) || dateText.includes(term) || patientText.includes(term)
       const matchesModality = !modalityFilter || r.modality === modalityFilter
       return matchesSearch && matchesModality
     })
@@ -71,25 +70,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {recentFinals.length > 0 && (
-          <section className="glass-panel p-4 sm:p-5 mb-6 sm:mb-8">
-            <h3 className="text-slate-500 font-medium mt-0 mb-3">Recent final reports</h3>
-            <ul className="list-none p-0 m-0 divide-y divide-slate-100">
-              {recentFinals.map((r) => (
-                <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                  <Link to={`/final/${r.id}`} className="no-underline text-slate-800 hover:text-primary min-w-0">
-                    <strong>{r.patient.full_name}</strong>
-                    <span className="text-slate-500 text-sm"> · {r.exam_title} · {formatStudyDate(r.study_date)}</span>
-                  </Link>
-                  <Link to={`/compare?patient=${r.patient.id}&report=${r.id}`} className="text-sm font-semibold text-primary">
-                    Compare
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
             {[
@@ -106,11 +86,29 @@ export default function DashboardPage() {
           </div>
         )}
 
+        <div role="tablist" className="inline-flex rounded-lg border border-slate-200 bg-white/80 p-1 mb-6">
+          {([['all', 'All reports'], ['final', 'Final reports']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={view === key}
+              onClick={() => setParams(key === 'final' ? { view: 'final' } : {}, { replace: true })}
+              className={`px-4 py-1.5 rounded-md text-sm font-semibold border-0 cursor-pointer ${
+                view === key ? 'bg-primary text-white' : 'bg-transparent text-slate-600 hover:text-primary'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {view === 'final' ? <FinalReportsPanel /> : (<>
         <div className="flex flex-wrap gap-3 sm:gap-4 mb-6">
           <input
             type="text"
             className="form-control w-full sm:max-w-sm"
-            placeholder="Search by date or study type..."
+            placeholder="Search by patient, date or study type..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -191,6 +189,7 @@ export default function DashboardPage() {
             ))}
           </div>
         )}
+        </>)}
       </main>
     </div>
   )

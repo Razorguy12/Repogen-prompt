@@ -333,11 +333,39 @@ def finalize_draft(draft_id: int, body: FinalizeRequest, request: Request, db: S
 # --------------------------------------------------------------------------- final reports
 
 @router.get("/final-reports")
-def recent_final_reports(limit: int = Query(default=10, ge=1, le=50), db: Session = Depends(get_db),
-                         user: User = Depends(auth.get_current_user)):
-    rows = (db.query(FinalReport).filter(FinalReport.doctor_id == user.id, clinical.current_version_filter())
-            .order_by(FinalReport.finalized_at.desc()).limit(limit).all())
+def list_final_reports(limit: int = Query(default=10, ge=1, le=200), q: str = Query(default="", max_length=100),
+                       db: Session = Depends(get_db), user: User = Depends(auth.get_current_user)):
+    """Current versions of this doctor's final reports, newest first; optional patient name/ID search."""
+    query = db.query(FinalReport).filter(FinalReport.doctor_id == user.id, clinical.current_version_filter())
+    if q.strip():
+        patient_ids = [p.id for p in clinical.search_patients(db, user.id, q, limit=200)]
+        if not patient_ids:
+            return []
+        query = query.filter(FinalReport.patient_id.in_(patient_ids))
+    rows = query.order_by(FinalReport.finalized_at.desc()).limit(limit).all()
     return [final_report_payload(fr, db, detail=False) for fr in rows]
+
+
+def latest_finals_for_drafts(db: Session, doctor_id: int, draft_ids: list[int]) -> dict[int, dict]:
+    """draft_id -> compact summary of its current final version (after any amendments)."""
+    if not draft_ids:
+        return {}
+    rows = (db.query(FinalReport)
+            .filter(FinalReport.doctor_id == doctor_id, FinalReport.draft_id.in_(draft_ids),
+                    clinical.current_version_filter())
+            .all())
+    return {
+        fr.draft_id: {
+            "id": fr.id,
+            "status": fr.status,
+            "patient_id": fr.patient_id,
+            "patient_name": fr.patient.full_name,
+            "patient_identifier": fr.patient.patient_identifier,
+            "exam_title": fr.exam_title,
+            "study_date": fr.study_date.isoformat(),
+        }
+        for fr in rows
+    }
 
 
 @router.get("/final-reports/by-draft/{draft_id}")
