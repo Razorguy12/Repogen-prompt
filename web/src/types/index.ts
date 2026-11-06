@@ -32,12 +32,27 @@ export interface ReportAlternative {
   full_report: string
 }
 
+export type Modality = 'XR' | 'CT' | 'MRI' | 'US' | 'DOPPLER' | 'MAMMO' | 'FLUORO' | 'OTHER' | 'UNSPECIFIED'
+export type Laterality = 'Left' | 'Right' | 'Bilateral' | 'Not applicable' | 'Not specified'
+export const MODALITIES: Modality[] = ['XR', 'CT', 'MRI', 'US', 'DOPPLER', 'MAMMO', 'FLUORO', 'OTHER', 'UNSPECIFIED']
+export const LATERALITIES: Laterality[] = ['Left', 'Right', 'Bilateral', 'Not applicable', 'Not specified']
+
+export interface ExamInfo {
+  modality: Modality
+  region: string
+  laterality: Laterality
+}
+
 export interface PromptInputParams {
   kind?: ReportKind
   prompt?: string
   report_format?: string
   selected?: string
   alternatives?: ReportAlternative[]
+  /** Absent on drafts created before prompt v2. */
+  exam?: ExamInfo | null
+  flags?: string[]
+  prompt_version?: string
 }
 
 export interface ReportSummary {
@@ -63,6 +78,9 @@ export interface PromptSession {
   prompt: string
   report_format?: string
   status?: 'draft' | 'final'
+  exam?: ExamInfo | null
+  flags?: string[]
+  prompt_version?: string | null
 }
 
 export interface ReportInputParams {

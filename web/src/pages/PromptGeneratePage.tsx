@@ -15,6 +15,11 @@ import {
 } from '../api/reports'
 import type { PromptSession, ReportAlternative, ReportSummary } from '../types'
 import { ApiError } from '../api/client'
+import { MarkdownReport } from '../components/MarkdownReport'
+import { FlagsPanel } from '../components/FlagsPanel'
+import { ExamChip } from '../components/ExamChip'
+import { InputTips } from '../components/InputTips'
+import { countBodyWords, displayRange, parseUtc } from '../lib/reportText'
 import '../prompt.css'
 
 const examples = [
@@ -46,34 +51,24 @@ const formatPresets = [
   { label: 'Organ-wise', text: 'Clinical indication\nTechnique\nFindings by organ / region\nImpression' },
 ]
 
-const typeCopy: Record<string, { label: string; hint: string }> = {
-  concise: { label: 'Concise', hint: '80–120 words' },
-  standard: { label: 'Standard', hint: '150–200 words' },
-  detailed: { label: 'Detailed', hint: '200–280 words' },
-}
-
-const countWords = (r: ReportAlternative) =>
-  [r.clinical_details, r.protocol, r.observations, r.impression]
-    .join(' ')
-    .split(/\s+/)
-    .filter(Boolean).length
+const typeLabel: Record<string, string> = { concise: 'Concise', standard: 'Standard', detailed: 'Detailed' }
 
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 }
 
 function dateGroupLabel(iso: string) {
-  const t = startOfDay(new Date(iso))
+  const t = startOfDay(parseUtc(iso))
   const today = startOfDay(new Date())
   const diff = Math.round((today - t) / 86_400_000)
   if (diff <= 0) return 'Today'
   if (diff === 1) return 'Yesterday'
   if (diff < 7) return 'This week'
-  return new Date(iso).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+  return parseUtc(iso).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
 function timeLabel(iso: string) {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return parseUtc(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
 function sessionFromSummary(r: ReportSummary): PromptSession | null {
@@ -88,6 +83,10 @@ function sessionFromSummary(r: ReportSummary): PromptSession | null {
     prompt: params.prompt || '',
     report_format: params.report_format || '',
     status: r.status,
+    // Pre-v2 drafts have neither key.
+    exam: params.exam ?? null,
+    flags: params.flags ?? [],
+    prompt_version: params.prompt_version ?? null,
   }
 }
 
@@ -107,6 +106,8 @@ export default function PromptGeneratePage() {
   const [session, setSession] = useState<PromptSession | null>(null)
   const [active, setActive] = useState(1)
   const [draftText, setDraftText] = useState('')
+  // Flag acknowledgements for the open draft: index -> ISO timestamp.
+  const [acks, setAcks] = useState<Record<number, string>>({})
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
 
@@ -119,7 +120,7 @@ export default function PromptGeneratePage() {
   const history = useMemo(() => {
     return reports
       .filter((r) => r.kind === 'prompt' || r.input_params?.alternatives)
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .sort((a, b) => parseUtc(b.created_at).getTime() - parseUtc(a.created_at).getTime())
   }, [reports])
 
   const groupedHistory = useMemo(() => {
@@ -136,6 +137,12 @@ export default function PromptGeneratePage() {
   }, [history])
 
   const current = session?.reports[active]
+  const flags = session?.flags ?? []
+  const allFlagsAcknowledged = flags.every((_, i) => !!acks[i])
+
+  useEffect(() => {
+    setAcks({})
+  }, [session?.id])
 
   useEffect(() => {
     if (current) setDraftText(current.full_report)
@@ -367,6 +374,9 @@ export default function PromptGeneratePage() {
               <article className="bubble user">
                 <div className="bubble-meta">You · {timeLabel(session.created_at)}</div>
                 <p>{session.prompt}</p>
+                {session.exam && (
+                  <div className="mt-2"><ExamChip exam={session.exam} /></div>
+                )}
                 {session.report_format && (
                   <pre className="format-preview">{session.report_format}</pre>
                 )}
@@ -374,6 +384,17 @@ export default function PromptGeneratePage() {
 
               <article className="bubble assistant">
                 <div className="bubble-meta">repogen · three drafts</div>
+                <FlagsPanel
+                  flags={flags}
+                  acknowledged={acks}
+                  onToggle={session.status === 'final' ? undefined : (i, checked) =>
+                    setAcks((prev) => {
+                      const next = { ...prev }
+                      if (checked) next[i] = new Date().toISOString()
+                      else delete next[i]
+                      return next
+                    })}
+                />
                 <div className="variant-tabs" role="tablist">
                   {session.reports.map((r, i) => (
                     <button
@@ -384,8 +405,8 @@ export default function PromptGeneratePage() {
                       className={`variant-tab ${i === active ? 'is-active' : ''} ${session.selected === r.type ? 'is-chosen' : ''}`}
                       onClick={() => selectVariant(i)}
                     >
-                      <strong>{typeCopy[r.type]?.label ?? r.type}</strong>
-                      <small>{typeCopy[r.type]?.hint ?? r.word_limit}</small>
+                      <strong>{typeLabel[r.type] ?? r.type}</strong>
+                      <small>Target {displayRange(r.word_limit)} words</small>
                     </button>
                   ))}
                 </div>
@@ -395,7 +416,9 @@ export default function PromptGeneratePage() {
                     <header>
                       <div>
                         <h3>{current.title}</h3>
-                        <span>{countWords(current)} words · {session.selected === current.type ? 'Selected' : 'Preview'}</span>
+                        <span>
+                          {countBodyWords(current.full_report)} words · target {displayRange(current.word_limit)} · {session.selected === current.type ? 'Selected' : 'Preview'}
+                        </span>
                       </div>
                       <div className="sheet-actions">
                         <button type="button" onClick={() => setEditing((v) => !v)}>{editing ? 'Close editor' : 'Edit'}</button>
@@ -411,31 +434,24 @@ export default function PromptGeneratePage() {
                         <button type="button" className="accent" onClick={saveEdits}>Save edits to this draft</button>
                       </div>
                     ) : (
-                      <div className="report-body">
-                        <section>
-                          <h4>Clinical Details</h4>
-                          <p>{current.clinical_details}</p>
-                        </section>
-                        <section>
-                          <h4>Protocol</h4>
-                          <p>{current.protocol}</p>
-                        </section>
-                        <section>
-                          <h4>Observations</h4>
-                          <p>{current.observations}</p>
-                        </section>
-                        <section className="impression">
-                          <h4>Impression</h4>
-                          <p>{current.impression}</p>
-                        </section>
-                      </div>
+                      <MarkdownReport className="report-markdown px-1 py-2" text={current.full_report} />
                     )}
 
                     <footer>
                       AI-generated draft. Not a medical record or diagnosis; it has not been reviewed or approved by a physician and requires review and sign-off by a board-certified radiologist or licensed physician before any clinical use. Choosing a tab saves that version for this timestamped record.
                       {session?.status === 'final'
                         ? <span className="badge-final">Final</span>
-                        : <button type="button" className="text-link" onClick={finalize}>Mark final</button>}
+                        : (
+                          <button
+                            type="button"
+                            className="text-link disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={finalize}
+                            disabled={!allFlagsAcknowledged}
+                            title={allFlagsAcknowledged ? 'Finalize this report' : 'Acknowledge every flag above before finalizing'}
+                          >
+                            Mark as final
+                          </button>
+                        )}
                     </footer>
                   </div>
                 )}
@@ -500,6 +516,7 @@ export default function PromptGeneratePage() {
                 Generate 3 drafts
               </button>
             </div>
+            <InputTips />
           </div>
         </form>
       </main>
