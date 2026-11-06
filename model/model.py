@@ -123,11 +123,18 @@ def _is_provider_limit(exc: Exception) -> bool:
 
 
 REPORT_PROMPT_VERSION = "v2"
+
+
+def current_prompt_version() -> str:
+    """Version stored with each draft; '+trim' marks per-request trimmed prompts (prompt_builder)."""
+    return f"{REPORT_PROMPT_VERSION}+trim" if trimming_enabled() else REPORT_PROMPT_VERSION
 SCHEMA_RETRY_INSTRUCTION = (
     "Your previous output was not valid JSON matching the schema. Return valid JSON only."
 )
 
-SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encoding="utf-8").strip()
+from model.prompt_builder import build_system_prompt, full_prompt, trimming_enabled  # noqa: E402
+
+SYSTEM_PROMPT = full_prompt()  # full text; requests use build_system_prompt()
 
 
 def _extract_json(content: str) -> dict:
@@ -246,7 +253,7 @@ def generate_reports(user_input: str, report_format: Optional[str] = None) -> Re
 
     client = Groq(api_key=GROQ_API_KEY)
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": build_system_prompt(user_input, report_format)},
         {"role": "user", "content": case_text},
     ]
     result, _attempts = generate_validated(client, messages, parse_generation)

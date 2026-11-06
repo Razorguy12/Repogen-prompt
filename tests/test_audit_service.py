@@ -15,6 +15,7 @@ from audit_service import log_audit_event, csv_safe_cell
 class AuditServiceTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
+        self._previous_log_dir = os.environ.get("AUDIT_LOG_DIR")
         os.environ["AUDIT_LOG_DIR"] = self.tempdir.name
         audit_file_logger._logger.handlers.clear()
         audit_file_logger._configured = False
@@ -26,7 +27,10 @@ class AuditServiceTests(unittest.TestCase):
         self.session.close()
         self.engine.dispose()
         self.tempdir.cleanup()
-        os.environ.pop("AUDIT_LOG_DIR", None)
+        if self._previous_log_dir is None:
+            os.environ.pop("AUDIT_LOG_DIR", None)
+        else:
+            os.environ["AUDIT_LOG_DIR"] = self._previous_log_dir
         for handler in audit_file_logger._logger.handlers:
             handler.close()
         audit_file_logger._logger.handlers.clear()

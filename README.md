@@ -207,8 +207,11 @@ cd web && npm test
 python scripts/prompt_regression.py            # or: ... bvm cyst
 ```
 
-The v2 system prompt is about 6.7k tokens. On Groq's on-demand tier (8,000 tokens per minute)
-a single generation can exceed the limit; the API then returns 503 with a clear message and nothing is saved.
+The full v2 system prompt is about 6.7k tokens. `model/prompt_builder.py` trims it per request to
+about 4.1–4.7k by sending only the glossary entries whose abbreviations appear in the input and the
+section-7 templates for the recognised examination (all rules are always sent; unknown examinations
+get every template). Set `REPORT_PROMPT_TRIM=0` to send the full prompt. If Groq still rejects a
+request for rate limits, the API returns 503 with a clear message and nothing is saved.
 
 ## Project layout
 
