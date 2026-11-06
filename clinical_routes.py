@@ -356,9 +356,9 @@ def get_final_report(report_id: int, db: Session = Depends(get_db), user: User =
         cursor = _own_final_report(db, user, cursor.amends_report_id)
         chain.insert(0, {"id": cursor.id, "status": cursor.status, "finalized_at": iso_utc(cursor.finalized_at)})
     data["previous_versions"] = chain
+    from comparison_routes import list_item  # local import: comparison_routes imports this module
     data["comparisons"] = [
-        {"id": c.id, "status": c.status, "created_at": iso_utc(c.created_at), "interval_days": c.interval_days,
-         "baseline_report_id": c.baseline_report_id, "followup_report_id": c.followup_report_id}
+        list_item(c, db)
         for c in db.query(Comparison).filter(
             Comparison.created_by == user.id, Comparison.status == "saved",
             (Comparison.baseline_report_id == fr.id) | (Comparison.followup_report_id == fr.id),

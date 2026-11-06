@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { AppHeader } from '../components/AppHeader'
 import { PatientSearch } from '../components/PatientSearch'
-import { generateComparison, getPatient, getPatientFinalReports } from '../api/clinical'
+import { generateComparison, getPatient, getPatientComparisons, getPatientFinalReports } from '../api/clinical'
 import { ApiError } from '../api/client'
-import { formatStudyDate } from '../lib/reportText'
+import { formatDateTime, formatStudyDate } from '../lib/reportText'
 import { orderPair, intervalDays, sameExam, filterReports, type ReportFilters } from '../lib/compare'
 import type { FinalReportSummary, Patient } from '../types/clinical'
 
@@ -47,6 +47,12 @@ export default function ComparePage() {
   const { data: reports = NO_REPORTS, isLoading } = useQuery({
     queryKey: ['patient-final-reports', patientId],
     queryFn: () => getPatientFinalReports(patientId),
+    enabled: patientId > 0,
+  })
+
+  const { data: history = [] } = useQuery({
+    queryKey: ['patient-comparisons', patientId],
+    queryFn: () => getPatientComparisons(patientId),
     enabled: patientId > 0,
   })
 
@@ -177,6 +183,21 @@ export default function ComparePage() {
                 </table>
               </div>
             )}
+          </section>
+        )}
+
+        {patient && history.length > 0 && (
+          <section className="glass-panel p-4 sm:p-5 mt-6">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 mt-0">Saved comparisons</h2>
+            <ul className="list-none p-0 m-0 space-y-1">
+              {history.map((h) => (
+                <li key={h.id} className="text-sm">
+                  <Link to={`/comparisons/${h.id}`} className="text-teal-800 underline">
+                    {formatDateTime(h.created_at)} · {h.baseline_study_date ? formatStudyDate(h.baseline_study_date) : '?'} → {h.followup_study_date ? formatStudyDate(h.followup_study_date) : '?'} ({h.interval_days} days)
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
       </main>

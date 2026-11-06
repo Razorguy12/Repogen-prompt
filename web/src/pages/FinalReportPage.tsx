@@ -172,7 +172,7 @@ export default function FinalReportPage() {
               {report.comparisons!.map((c) => (
                 <li key={c.id} className="text-sm">
                   <Link to={`/comparisons/${c.id}`} className="text-teal-800 underline">
-                    {formatDateTime(c.created_at)} · interval {c.interval_days} days
+                    {formatDateTime(c.created_at)} · {c.baseline_study_date ? formatStudyDate(c.baseline_study_date) : '?'} → {c.followup_study_date ? formatStudyDate(c.followup_study_date) : '?'} ({c.interval_days} days)
                   </Link>
                 </li>
               ))}

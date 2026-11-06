@@ -18,6 +18,7 @@ import AdminPage from './pages/AdminPage'
 import AuditLogsPage from './pages/AuditLogsPage'
 import FinalReportPage from './pages/FinalReportPage'
 import ComparePage from './pages/ComparePage'
+import ComparisonPage from './pages/ComparisonPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,6 +38,7 @@ const router = createBrowserRouter([
   { path: '/reports/:id', element: <ProtectedRoute><ReportPreviewPage /></ProtectedRoute> },
   { path: '/final/:id', element: <ProtectedRoute><FinalReportPage /></ProtectedRoute> },
   { path: '/compare', element: <ProtectedRoute><ComparePage /></ProtectedRoute> },
+  { path: '/comparisons/:id', element: <ProtectedRoute><ComparisonPage /></ProtectedRoute> },
   { path: '/admin', element: <AdminRoute><AdminPage /></AdminRoute> },
   { path: '/admin/audit-logs', element: <AdminRoute><AuditLogsPage /></AdminRoute> },
 ])

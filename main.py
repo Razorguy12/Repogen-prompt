@@ -37,7 +37,9 @@ load_dotenv()
 app = FastAPI(title="Radiology Report Generator", version="1.0.0")
 
 import clinical_routes  # noqa: E402  (after app creation to keep import order obvious)
+import comparison_routes  # noqa: E402
 app.include_router(clinical_routes.router)
+app.include_router(comparison_routes.router)
 _audit_rate_lock = threading.Lock()
 _audit_rate_windows: dict[tuple[int, str], list[float]] = {}
 
