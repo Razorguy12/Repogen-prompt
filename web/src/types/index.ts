@@ -104,6 +104,7 @@ export interface UserProfile {
   username: string
   email: string
   is_admin: boolean
+  is_root_admin?: boolean
 }
 
 export interface AdminUser {
@@ -113,6 +114,7 @@ export interface AdminUser {
   email: string
   is_admin: boolean
   is_locked: boolean
+  is_root_admin?: boolean
   report_count: number
 }
 

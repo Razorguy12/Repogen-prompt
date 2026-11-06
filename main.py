@@ -55,24 +55,33 @@ async def audit_request_id(request: Request, call_next):
     response.headers["X-Request-ID"] = request.state.request_id
     return response
 
+ROOT_ADMIN_USERNAME = os.getenv("ROOT_ADMIN_USERNAME", "azharsait2006").strip().lower()
+
+
 @app.on_event("startup")
 def startup():
-    run_migrations(engine)
+    """Ensure the root admin exists. Credentials come from the environment only."""
     db = next(get_db())
-    admin = db.query(User).filter(User.username == "azharsait2006").first()
-    if not admin:
-        new_admin = User(
-            name="Azhar Sait",
-            username="azharsait2006",
-            email="azhar.sait@outlook.com",
-            hashed_password=auth.get_password_hash("Azba@2001"),
-            is_admin=True
-        )
-        db.add(new_admin)
-        db.commit()
-    elif not admin.is_admin:
-        admin.is_admin = True
-        db.commit()
+    try:
+        admin = db.query(User).filter(func.lower(User.username) == ROOT_ADMIN_USERNAME).first()
+        if not admin:
+            password = os.getenv("ROOT_ADMIN_PASSWORD")
+            if not password:
+                print("WARNING: root admin missing and ROOT_ADMIN_PASSWORD is not set; skipping bootstrap")
+                return
+            db.add(User(
+                name=os.getenv("ROOT_ADMIN_NAME", "Administrator"),
+                username=ROOT_ADMIN_USERNAME,
+                email=os.getenv("ROOT_ADMIN_EMAIL"),
+                hashed_password=auth.get_password_hash(password),
+                is_admin=True,
+            ))
+            db.commit()
+        elif not admin.is_admin:
+            admin.is_admin = True
+            db.commit()
+    finally:
+        db.close()
 
 # Add CORS middleware
 app.add_middleware(
@@ -223,7 +232,8 @@ async def logout(request: Request, reason: str | None = Query(default=None), cur
 
 @app.get("/api/users/me")
 async def read_users_me(current_user: User = Depends(auth.get_current_user)):
-    return {"name": current_user.name, "username": current_user.username, "email": current_user.email, "is_admin": current_user.is_admin}
+    return {"name": current_user.name, "username": current_user.username, "email": current_user.email, "is_admin": current_user.is_admin,
+            "is_root_admin": (current_user.username or "").lower() == ROOT_ADMIN_USERNAME}
 
 @app.post("/api/users")
 async def create_user(user: UserCreate, db: Session = Depends(get_db), current_admin: User = Depends(auth.get_current_admin)):
@@ -260,6 +270,7 @@ async def list_users(db: Session = Depends(get_db), current_admin: User = Depend
             "id": user.id,
             "name": user.name,
             "username": user.username,
+            "is_root_admin": (user.username or "").lower() == ROOT_ADMIN_USERNAME,
             "email": user.email,
             "is_admin": user.is_admin,
             "is_locked": user.is_locked,
@@ -305,8 +316,8 @@ async def delete_doctor(user_id: int, db: Session = Depends(get_db), current_adm
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    is_root_admin = current_admin.username == "azharsait2006"
-    if user.username == "azharsait2006":
+    is_root_admin = current_admin.username.lower() == ROOT_ADMIN_USERNAME
+    if user.username.lower() == ROOT_ADMIN_USERNAME:
         raise HTTPException(status_code=400, detail="The root admin account cannot be deleted")
     if user.is_admin and not is_root_admin:
         raise HTTPException(status_code=403, detail="Only the root admin can delete admin accounts")

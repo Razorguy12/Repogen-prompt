@@ -34,7 +34,7 @@ export default function AdminPage() {
     queryFn: getUsers,
   })
   const { data: currentProfile } = useQuery({ queryKey: ['me'], queryFn: getMe })
-  const isRootAdmin = currentProfile?.username === 'azharsait2006'
+  const isRootAdmin = !!currentProfile?.is_root_admin
 
   const { data: myReports = [] } = useQuery({
     queryKey: ['reports'],
@@ -233,7 +233,7 @@ export default function AdminPage() {
                           >
                             Change password
                           </button>
-                          {(!u.is_admin || isRootAdmin) && u.username !== 'azharsait2006' && (
+                          {(!u.is_admin || isRootAdmin) && !u.is_root_admin && (
                             <button
                               type="button"
                               className="ml-2 text-sm text-red-600 hover:text-red-800 bg-transparent border-0 cursor-pointer"
