@@ -20,6 +20,7 @@ from database import (engine, Base, get_db, User, Report, AuditEvent, Patient, F
                       iso_utc)
 import auth
 from audit_service import log_audit_event, csv_safe_cell
+from rate_limit import enforce_rate_limit
 import csv
 import io
 import time
@@ -381,6 +382,7 @@ async def dashboard_stats(db: Session = Depends(get_db), current_user: User = De
 @app.post("/api/generate-report", response_model=GenerateReportResponse)
 async def generate_report(request: ReportRequest, http_request: Request, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     started = time.perf_counter()
+    enforce_rate_limit(current_user.id, "generate", limit=10)
     try:
         ensure_user_can_generate(db, current_user)
     except HTTPException:
@@ -536,6 +538,7 @@ async def generate_alternatives(
     db: Session = Depends(get_db),
 ):
     started = time.perf_counter()
+    enforce_rate_limit(current_user.id, "generate", limit=10)
     if not request.prompt.strip():
         log_audit_event(db, "REPORT_GENERATION_FAILED", user_id=current_user.id, request=http_request,
                         status="FAILED", details={"failure_category": "empty_prompt", "workflow": "prompt"},
