@@ -11,8 +11,10 @@ import {
   getReport,
   getReports,
   updatePromptDraft,
-  updateReportStatus,
 } from '../api/reports'
+import { getFinalReportForDraft } from '../api/clinical'
+import { FinalizeModal } from '../components/FinalizeModal'
+import { copyText } from '../lib/clipboard'
 import type { PromptSession, ReportAlternative, ReportSummary } from '../types'
 import { ApiError } from '../api/client'
 import { MarkdownReport } from '../components/MarkdownReport'
@@ -108,6 +110,7 @@ export default function PromptGeneratePage() {
   const [draftText, setDraftText] = useState('')
   // Flag acknowledgements for the open draft: index -> ISO timestamp.
   const [acks, setAcks] = useState<Record<number, string>>({})
+  const [finalizeOpen, setFinalizeOpen] = useState(false)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
 
@@ -242,35 +245,33 @@ export default function PromptGeneratePage() {
 
   const copyReport = async (r: ReportAlternative) => {
     try {
-      if (navigator.clipboard?.writeText && window.isSecureContext) {
-        await navigator.clipboard.writeText(r.full_report)
-      } else {
-        const copyArea = document.createElement('textarea')
-        copyArea.value = r.full_report
-        copyArea.setAttribute('readonly', '')
-        copyArea.style.position = 'fixed'
-        copyArea.style.opacity = '0'
-        document.body.appendChild(copyArea)
-        copyArea.select()
-        const copied = document.execCommand('copy')
-        copyArea.remove()
-        if (!copied) throw new Error('Clipboard access is unavailable')
-      }
+      await copyText(r.full_report)
       toast.success('Copied to clipboard')
     } catch {
       toast.error('Could not copy report. Check clipboard permissions and try again.')
     }
   }
 
-  const finalize = async () => {
+  const finalize = () => {
+    if (!session || !current) return
+    if (current.type !== session.selected) {
+      toast.error('Select this variant first')
+      return
+    }
+    if (editing && draftText !== current.full_report) {
+      toast.error('Save your edits before finalizing')
+      return
+    }
+    setFinalizeOpen(true)
+  }
+
+  const openFinalReport = async () => {
     if (!session) return
     try {
-      await updateReportStatus(session.id, 'final')
-      setSession((s) => (s ? { ...s, status: 'final' } : s))
-      toast.success('Marked as final')
-      queryClient.invalidateQueries({ queryKey: ['reports'] })
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Could not finalize')
+      const { id } = await getFinalReportForDraft(session.id)
+      navigate(`/final/${id}`)
+    } catch {
+      toast.error('This draft was marked final before patient details were introduced.')
     }
   }
 
@@ -440,7 +441,11 @@ export default function PromptGeneratePage() {
                     <footer>
                       AI-generated draft. Not a medical record or diagnosis; it has not been reviewed or approved by a physician and requires review and sign-off by a board-certified radiologist or licensed physician before any clinical use. Choosing a tab saves that version for this timestamped record.
                       {session?.status === 'final'
-                        ? <span className="badge-final">Final</span>
+                        ? (
+                          <button type="button" className="text-link" onClick={openFinalReport}>
+                            <span className="badge-final">Final</span> View final report
+                          </button>
+                        )
                         : (
                           <button
                             type="button"
@@ -520,6 +525,20 @@ export default function PromptGeneratePage() {
           </div>
         </form>
       </main>
+      {finalizeOpen && session && current && (
+        <FinalizeModal
+          draftId={session.id}
+          variant={current}
+          exam={session.exam}
+          flagAcks={acks}
+          onClose={() => setFinalizeOpen(false)}
+          onFinalized={(report) => {
+            setFinalizeOpen(false)
+            queryClient.invalidateQueries({ queryKey: ['reports'] })
+            navigate(`/final/${report.id}`)
+          }}
+        />
+      )}
     </div>
   )
 }

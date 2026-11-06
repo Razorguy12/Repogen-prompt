@@ -24,11 +24,14 @@ export function expireSession(): void {
 
 export class ApiError extends Error {
   status: number
+  /** Structured `detail` from the API when it is an object (e.g. duplicate-patient matches). */
+  detail?: unknown
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, detail?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -54,16 +57,21 @@ export async function apiFetch<T>(
   if (!response.ok) {
     if (response.status === 401 && token && path !== '/api/token') expireSession()
     let message = `Request failed (${response.status})`
+    let detail: unknown
     try {
       const data = await response.json()
+      detail = data.detail
       message = data.detail || data.message || message
+      if (message && typeof message === 'object' && !Array.isArray(message)) {
+        message = (message as { message?: string }).message || `Request failed (${response.status})`
+      }
       if (Array.isArray(message)) {
         message = message.map((e: { msg?: string }) => e.msg || String(e)).join(', ')
       }
     } catch {
       // ignore parse errors
     }
-    throw new ApiError(response.status, String(message))
+    throw new ApiError(response.status, String(message), detail)
   }
 
   if (response.status === 204) {

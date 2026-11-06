@@ -17,10 +17,13 @@ SAFE_EVENTS = {
     "USER_CREATED", "USER_UPDATED", "USER_DEACTIVATED", "USER_ROLE_CHANGED",
     "PASSWORD_CHANGED", "PASSWORD_RESET", "ACCESS_DENIED", "ADMIN_ACTION",
     "AUDIT_CSV_EXPORTED", "API_ERROR",
+    "PATIENT_CREATED", "PATIENT_UPDATED", "REPORT_FINALIZED", "REPORT_AMENDED",
+    "FINAL_REPORT_EXPORTED", "COMPARISON_GENERATED", "COMPARISON_GENERATION_FAILED", "COMPARISON_SAVED",
 }
 SAFE_DETAIL_KEYS = {
     "workflow", "variants", "failure_category", "auth_method", "role", "operation",
     "status", "format", "expiration_source", "filters_applied", "resource",
+    "attempts", "examinations_comparable", "interval_adjusted",
 }
 
 

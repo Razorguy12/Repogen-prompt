@@ -35,6 +35,9 @@ upgrade_schema(engine)
 load_dotenv()
 
 app = FastAPI(title="Radiology Report Generator", version="1.0.0")
+
+import clinical_routes  # noqa: E402  (after app creation to keep import order obvious)
+app.include_router(clinical_routes.router)
 _audit_rate_lock = threading.Lock()
 _audit_rate_windows: dict[tuple[int, str], list[float]] = {}
 
@@ -822,6 +825,9 @@ async def update_report_status(report_id: int, body: StatusUpdate, db: Session =
         raise HTTPException(status_code=400, detail="Status must be 'draft' or 'final'")
     report = get_report_or_404(report_id, db)
     check_report_access(report, current_user)
+    if body.status == "draft" and db.query(FinalReport.id).filter(FinalReport.draft_id == report.id).first():
+        raise HTTPException(status_code=409, detail="This report has a signed final version and cannot be reopened. "
+                                                    "Add an amendment instead.")
     report.status = body.status
     report.updated_at = datetime.datetime.utcnow()
     db.commit()
