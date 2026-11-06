@@ -6,6 +6,8 @@ import { ReportCard } from '../components/ReportCard'
 import { SkeletonCard } from '../components/LoadingOverlay'
 import { useAuth } from '../context/AuthContext'
 import { getReports, getDashboardStats } from '../api/reports'
+import { getRecentFinalReports } from '../api/clinical'
+import { formatStudyDate, parseUtc } from '../lib/reportText'
 
 export default function DashboardPage() {
   const { name, token } = useAuth()
@@ -24,6 +26,12 @@ export default function DashboardPage() {
     enabled: !!token,
   })
 
+  const { data: recentFinals = [] } = useQuery({
+    queryKey: ['recent-final-reports', token],
+    queryFn: () => getRecentFinalReports(10),
+    enabled: !!token,
+  })
+
   const modalities = useMemo(() => {
     const set = new Set(reports.map((r) => r.modality).filter(Boolean))
     return Array.from(set).sort()
@@ -33,7 +41,7 @@ export default function DashboardPage() {
     let result = reports.filter((r) => {
       const term = search.toLowerCase()
       const modality = (r.modality ?? '').toLowerCase()
-      const date = new Date(r.created_at)
+      const date = parseUtc(r.created_at)
       const dateText = [
         r.created_at,
         date.toLocaleDateString(),
@@ -53,10 +61,34 @@ export default function DashboardPage() {
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
         <div className="flex flex-wrap justify-between items-center gap-3 sm:gap-4 mb-6 sm:mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-primary-dark m-0">Welcome, {name}</h1>
-          <Link to="/generate" className="btn btn-primary text-sm sm:text-base py-2 px-3.5 sm:px-4">
-            + New Report
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/compare" className="btn btn-secondary text-sm sm:text-base py-2 px-3.5 sm:px-4">
+              Compare reports
+            </Link>
+            <Link to="/generate" className="btn btn-primary text-sm sm:text-base py-2 px-3.5 sm:px-4">
+              + New Report
+            </Link>
+          </div>
         </div>
+
+        {recentFinals.length > 0 && (
+          <section className="glass-panel p-4 sm:p-5 mb-6 sm:mb-8">
+            <h3 className="text-slate-500 font-medium mt-0 mb-3">Recent final reports</h3>
+            <ul className="list-none p-0 m-0 divide-y divide-slate-100">
+              {recentFinals.map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                  <Link to={`/final/${r.id}`} className="no-underline text-slate-800 hover:text-primary min-w-0">
+                    <strong>{r.patient.full_name}</strong>
+                    <span className="text-slate-500 text-sm"> · {r.exam_title} · {formatStudyDate(r.study_date)}</span>
+                  </Link>
+                  <Link to={`/compare?patient=${r.patient.id}&report=${r.id}`} className="text-sm font-semibold text-primary">
+                    Compare
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
@@ -140,7 +172,7 @@ export default function DashboardPage() {
           <div className="space-y-8">
             {Object.entries(
               filtered.reduce<Record<string, typeof filtered>>((acc, r) => {
-                const key = new Date(r.created_at).toLocaleDateString(undefined, {
+                const key = parseUtc(r.created_at).toLocaleDateString(undefined, {
                   weekday: 'long',
                   day: 'numeric',
                   month: 'long',
