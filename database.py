@@ -1,6 +1,8 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, Text, text, JSON, Index
+from sqlalchemy import (create_engine, Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text, text,
+                        JSON, Index, UniqueConstraint, CheckConstraint, func)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.types import TypeDecorator
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
@@ -89,6 +91,153 @@ class AuditEvent(Base):
         Index("ix_audit_events_status", "status"),
         Index("ix_audit_events_resource_id", "resource_id"),
     )
+
+def utcnow() -> datetime.datetime:
+    """Timezone-aware UTC now. All new tables store timestamptz."""
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+class UTCDateTime(TypeDecorator):
+    """timestamptz that always binds UTC and always returns aware UTC values.
+
+    Postgres does this natively; SQLite would otherwise drop the offset and
+    keep local wall-clock time. Naive inputs are rejected so a local time can
+    never be stored by mistake.
+    """
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError("UTCDateTime requires a timezone-aware datetime")
+        value = value.astimezone(datetime.timezone.utc)
+        return value.replace(tzinfo=None) if dialect.name == "sqlite" else value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=datetime.timezone.utc)
+        return value.astimezone(datetime.timezone.utc)
+
+
+def iso_utc(value):
+    """Serialise a datetime as ISO-8601 UTC with a trailing Z.
+
+    Legacy `reports` columns are naive but hold UTC (written by utcnow()),
+    so naive values are tagged as UTC rather than converted.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=datetime.timezone.utc)
+        return value.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.isoformat()
+
+
+JSONType = JSON().with_variant(JSONB, "postgresql")
+GENDERS = ("Male", "Female", "Other", "Not stated")
+MODALITY_VALUES = ("XR", "CT", "MRI", "US", "DOPPLER", "MAMMO", "FLUORO", "OTHER", "UNSPECIFIED")
+AGE_UNITS = ("years", "months", "days")
+
+
+def _in(column, values):
+    return f"{column} IN ({', '.join(repr(v) for v in values)})"
+
+
+class TimestampMixin:
+    # Set by the server/ORM only; never accepted from clients.
+    created_at = Column(UTCDateTime(), nullable=False, default=utcnow, server_default=func.now())
+    updated_at = Column(UTCDateTime(), nullable=False, default=utcnow, onupdate=utcnow,
+                        server_default=func.now())
+
+
+class Patient(TimestampMixin, Base):
+    """A patient, private to the doctor who created it (owner_doctor_id)."""
+    __tablename__ = "patients"
+
+    id = Column(Integer, primary_key=True)
+    owner_doctor_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    patient_identifier = Column(String(64), nullable=True)            # MRN / UHID as entered
+    patient_identifier_normalized = Column(String(64), nullable=True)  # upper-case, no spaces; for matching
+    full_name = Column(String(100), nullable=False)
+    full_name_normalized = Column(String(100), nullable=False)
+    gender = Column(String(16), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("owner_doctor_id", "patient_identifier_normalized", name="uq_patients_owner_identifier"),
+        CheckConstraint(_in("gender", GENDERS), name="ck_patients_gender"),
+        Index("ix_patients_full_name_normalized", "full_name_normalized"),
+    )
+
+
+class FinalReport(TimestampMixin, Base):
+    """An immutable, signed report. Amendments are new rows (amends_report_id)."""
+    __tablename__ = "final_reports"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("reports.id", ondelete="RESTRICT"), nullable=False, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False)
+    doctor_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="final")
+    amends_report_id = Column(Integer, ForeignKey("final_reports.id", ondelete="RESTRICT"), nullable=True, index=True)
+    selected_variant = Column(String(16), nullable=False)
+    final_text = Column(Text, nullable=False)
+    final_sections = Column(JSONType, nullable=True)
+    exam_modality = Column(String(16), nullable=False)
+    exam_region = Column(String(120), nullable=False)
+    exam_laterality = Column(String(32), nullable=False)
+    exam_title = Column(String(200), nullable=False)
+    patient_age_at_study = Column(Integer, nullable=False)
+    age_unit = Column(String(8), nullable=False)
+    study_date = Column(Date, nullable=False)
+    source_input = Column(Text, nullable=True)
+    flags = Column(JSONType, nullable=False, default=list)
+    flag_acknowledgements = Column(JSONType, nullable=False, default=list)  # [{flag, acknowledged_at}]
+    flags_acknowledged_at = Column(UTCDateTime(), nullable=True)
+    prompt_version = Column(String(16), nullable=True)
+    model_id = Column(String(120), nullable=True)
+    finalized_at = Column(UTCDateTime(), nullable=False, default=utcnow)
+
+    patient = relationship("Patient")
+    doctor = relationship("User", foreign_keys=[doctor_id])
+
+    __table_args__ = (
+        CheckConstraint("status IN ('final', 'amended')", name="ck_final_reports_status"),
+        CheckConstraint("selected_variant IN ('concise', 'standard', 'detailed')", name="ck_final_reports_variant"),
+        CheckConstraint(_in("exam_modality", MODALITY_VALUES), name="ck_final_reports_modality"),
+        CheckConstraint(_in("age_unit", AGE_UNITS), name="ck_final_reports_age_unit"),
+        CheckConstraint("(status = 'amended') = (amends_report_id IS NOT NULL)", name="ck_final_reports_amend_link"),
+        Index("ix_final_reports_patient_study_date", "patient_id", "study_date"),
+        Index("ix_final_reports_exam_modality", "exam_modality"),
+        Index("ix_final_reports_exam_region", "exam_region"),
+    )
+
+
+class Comparison(TimestampMixin, Base):
+    __tablename__ = "comparisons"
+
+    id = Column(Integer, primary_key=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    baseline_report_id = Column(Integer, ForeignKey("final_reports.id", ondelete="RESTRICT"), nullable=False, index=True)
+    followup_report_id = Column(Integer, ForeignKey("final_reports.id", ondelete="RESTRICT"), nullable=False, index=True)
+    interval_days = Column(Integer, nullable=False)
+    result = Column(JSONType, nullable=False)
+    edited_summary = Column(Text, nullable=True)
+    edited_impression = Column(JSONType, nullable=True)
+    status = Column(String(8), nullable=False, default="draft")
+    prompt_version = Column(String(16), nullable=True)
+    model_id = Column(String(120), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'saved')", name="ck_comparisons_status"),
+        CheckConstraint("baseline_report_id <> followup_report_id", name="ck_comparisons_distinct"),
+    )
+
 
 def get_db():
     db = SessionLocal()

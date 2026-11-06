@@ -16,7 +16,8 @@ import pdfplumber
 import model.model as model
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_, desc, asc
-from database import engine, Base, get_db, User, Report, AuditEvent, upgrade_schema
+from database import (engine, Base, get_db, User, Report, AuditEvent, Patient, FinalReport, upgrade_schema,
+                      iso_utc)
 import auth
 from audit_service import log_audit_event, csv_safe_cell
 import csv
@@ -166,8 +167,8 @@ def serialize_report(r: Report) -> dict:
         "modality": r.modality,
         "status": getattr(r, "status", None) or "draft",
         "kind": kind,
-        "created_at": r.created_at,
-        "updated_at": getattr(r, "updated_at", None) or r.created_at,
+        "created_at": iso_utc(r.created_at),
+        "updated_at": iso_utc(getattr(r, "updated_at", None) or r.created_at),
         "report_data": report_dict,
         "input_params": input_params,
         "scan_image": getattr(r, "scan_image", None),
@@ -320,6 +321,14 @@ async def delete_doctor(user_id: int, db: Session = Depends(get_db), current_adm
         raise HTTPException(status_code=400, detail="The root admin account cannot be deleted")
     if user.is_admin and not is_root_admin:
         raise HTTPException(status_code=403, detail="Only the root admin can delete admin accounts")
+    # Signed clinical records must survive account removal; refuse rather than cascade.
+    has_clinical = (
+        db.query(FinalReport.id).filter(FinalReport.doctor_id == user_id).first()
+        or db.query(Patient.id).filter(Patient.owner_doctor_id == user_id).first()
+    )
+    if has_clinical:
+        raise HTTPException(status_code=409, detail="This doctor has finalized reports or patients on file and cannot be "
+                                                    "deleted. Lock the account instead.")
     db.query(Report).filter(Report.user_id == user_id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
@@ -434,7 +443,7 @@ class PromptRequest(BaseModel):
 
 class PromptSessionResponse(BaseModel):
     id: int
-    created_at: datetime.datetime
+    created_at: str  # ISO-8601 UTC with Z
     selected: str
     reports: list[model.RadiologyReport]
     prompt: str
@@ -501,7 +510,7 @@ def session_payload(report: Report) -> dict:
     alternatives = params.get("alternatives") or []
     return {
         "id": report.id,
-        "created_at": report.created_at,
+        "created_at": iso_utc(report.created_at),
         "selected": params.get("selected") or "standard",
         "reports": alternatives,
         "prompt": params.get("prompt") or "",
