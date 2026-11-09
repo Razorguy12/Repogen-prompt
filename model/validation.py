@@ -116,8 +116,10 @@ def _opposite_side(findings: str, exam_laterality: str) -> str | None:
     return "right" if left else "left"
 
 
-def warnings(result, findings: str, report_format: str | None = None) -> list[str]:
+def warnings(result, findings: str, report_format: str | None = None, check_fields: bool | None = None) -> list[str]:
     out: list[str] = []
+    if check_fields is None:
+        check_fields = not (report_format or "").strip()
     supplied = _source_numbers(findings)
     wrong_side = _opposite_side(findings, result.exam.laterality)
     for report in result.reports:
@@ -136,7 +138,7 @@ def warnings(result, findings: str, report_format: str | None = None) -> list[st
                 out.append(f"{label} report: {count} words, outside the {low}-{high} range.")
         if wrong_side and re.search(rf"\b{wrong_side}\b", text, re.I):
             out.append(f"{label} report: mentions the {wrong_side} side, but the dictation gives only the other side.")
-        if not (report_format or "").strip():
+        if check_fields:
             whole = _normalise(report.full_report)
             for name in ("observations", "impression"):
                 if _normalise(getattr(report, name)) not in whole:
@@ -144,9 +146,10 @@ def warnings(result, findings: str, report_format: str | None = None) -> list[st
     return out
 
 
-def validate_output(result, findings: str, report_format: str | None = None) -> list[str]:
+def validate_output(result, findings: str, report_format: str | None = None,
+                    check_fields: bool | None = None) -> list[str]:
     """Raise OutputValidationError on a hard failure; otherwise return warning texts."""
     errors = hard_failures(result, findings)
     if errors:
         raise OutputValidationError("\n".join(errors))
-    return warnings(result, findings, report_format)
+    return warnings(result, findings, report_format, check_fields)

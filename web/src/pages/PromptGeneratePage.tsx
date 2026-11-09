@@ -10,8 +10,10 @@ import {
   generateAlternatives,
   getDraftFlags,
   getReport,
+  getReportFormats,
   getReports,
   reviewDraftFlag,
+  saveCustomFormat,
   updatePromptDraft,
 } from '../api/reports'
 import { getFinalReportForDraft } from '../api/clinical'
@@ -32,29 +34,19 @@ const examples = [
   {
     label: 'CT brain',
     prompt: 'CT brain plain. 3.4 × 2.3 cm extra-axial lesion along the right frontal convexity, suspected meningioma. Headache 2 weeks.',
-    format: 'Title\nClinical Details\nProtocol\nObservations\nImpression',
   },
   {
     label: 'MRI lumbar',
     prompt: 'MRI lumbar spine: L4–L5 disc bulge compressing the left traversing nerve root. Low back pain radiating to left leg.',
-    format: 'EXAMINATION\nTECHNIQUE\nFINDINGS (by level)\nIMPRESSION (numbered)',
   },
   {
     label: 'Chest X-ray',
     prompt: 'Chest X-ray PA: right lower zone opacity with blunting of the right costophrenic angle. Fever and cough 5 days.',
-    format: 'Study\nClinical history\nFindings\nImpression',
   },
   {
     label: 'USG abdomen',
     prompt: 'USG abdomen: 12 mm gallstone in the gallbladder lumen, no wall thickening, no pericholecystic fluid. Right upper quadrant pain.',
-    format: 'Organ-wise: Liver, Gallbladder, Pancreas, Spleen, Kidneys, Impression',
   },
-]
-
-const formatPresets = [
-  { label: 'Classic', text: 'Title\nClinical Details\nProtocol\nObservations\nImpression' },
-  { label: 'Numbered impression', text: 'Examination\nTechnique\nFindings\nImpression (numbered list)\nRecommendation' },
-  { label: 'Organ-wise', text: 'Clinical indication\nTechnique\nFindings by organ / region\nImpression' },
 ]
 
 const typeLabel: Record<string, string> = { concise: 'Concise', standard: 'Standard', detailed: 'Detailed' }
@@ -96,6 +88,17 @@ function sessionFromSummary(r: ReportSummary): PromptSession | null {
   }
 }
 
+const FORMAT_KEY = 'report_format_id'
+
+function readSavedFormatId(): string {
+  try {
+    const saved = localStorage.getItem(FORMAT_KEY)
+    return !saved || saved === 'organwise' ? 'structured' : saved
+  } catch {
+    return 'structured'
+  }
+}
+
 export default function PromptGeneratePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -104,7 +107,8 @@ export default function PromptGeneratePage() {
   const requestedId = Number(params.get('id') || 0)
 
   const [prompt, setPrompt] = useState('')
-  const [reportFormat, setReportFormat] = useState('')
+  const [formatId, setFormatId] = useState(readSavedFormatId)
+  const [customFormat, setCustomFormat] = useState('')
   const [showFormat, setShowFormat] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -126,6 +130,32 @@ export default function PromptGeneratePage() {
     queryFn: getReports,
     enabled: !!token,
   })
+
+  const { data: formatOptions } = useQuery({
+    queryKey: ['report-formats', token],
+    queryFn: getReportFormats,
+    enabled: !!token,
+  })
+  const savedCustom = !!formatOptions?.custom
+
+  useEffect(() => {
+    if (formatOptions) setCustomFormat(formatOptions.custom)
+  }, [formatOptions])
+
+  const chooseFormat = (id: string) => {
+    setFormatId(id)
+    try { localStorage.setItem(FORMAT_KEY, id) } catch { /* the choice just is not remembered */ }
+  }
+
+  const persistCustomFormat = async (text: string) => {
+    try {
+      await saveCustomFormat(text)
+      queryClient.invalidateQueries({ queryKey: ['report-formats'] })
+      toast.success(text.trim() ? 'Custom format saved' : 'Custom format removed')
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Could not save the format')
+    }
+  }
 
   const history = useMemo(() => {
     return reports
@@ -209,7 +239,6 @@ export default function PromptGeneratePage() {
         }
         setSession(loaded)
         setPrompt(loaded.prompt)
-        setReportFormat(loaded.report_format || '')
         const idx = loaded.reports.findIndex((r) => r.type === loaded.selected)
         setActive(idx >= 0 ? idx : 1)
         setEditing(false)
@@ -232,7 +261,6 @@ export default function PromptGeneratePage() {
   const startNew = () => {
     setSession(null)
     setPrompt('')
-    setReportFormat('')
     setEditing(false)
     setActive(1)
     setParams({}, { replace: true })
@@ -252,7 +280,7 @@ export default function PromptGeneratePage() {
     setLoading(true)
     setEditing(false)
     try {
-      const result = await generateAlternatives(prompt.trim(), reportFormat.trim())
+      const result = await generateAlternatives(prompt.trim(), formatId)
       applySession(result)
       toast.success('Three drafts are ready — pick one')
     } catch (err) {
@@ -413,7 +441,6 @@ export default function PromptGeneratePage() {
                     className="example-card"
                     onClick={() => {
                       setPrompt(ex.prompt)
-                      setReportFormat(ex.format)
                       composerRef.current?.focus()
                     }}
                   >
@@ -554,21 +581,41 @@ export default function PromptGeneratePage() {
           <div className="composer-box">
             {showFormat && (
               <div className="format-field">
-                <div className="format-head">
-                  <label htmlFor="report-format">Report format</label>
-                  <div className="preset-row">
-                    {formatPresets.map((p) => (
-                      <button key={p.label} type="button" onClick={() => setReportFormat(p.text)}>{p.label}</button>
-                    ))}
+                <div className="format-head"><label>Report format</label></div>
+                {customFormat.trim() !== '' && savedCustom && (
+                  <p className="format-override">Your custom format is in use and overrides these presets.</p>
+                )}
+                <div className="format-options">
+                  {(formatOptions?.presets ?? []).map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="format-option"
+                      aria-pressed={!savedCustom && formatId === p.id}
+                      disabled={savedCustom}
+                      onClick={() => chooseFormat(p.id)}
+                    >
+                      <strong>{p.label}</strong>
+                      <small>{p.description}</small>
+                    </button>
+                  ))}
+                </div>
+                <div className="format-custom">
+                  <label htmlFor="report-format">My custom format</label>
+                  <textarea
+                    id="report-format"
+                    value={customFormat}
+                    onChange={(e) => setCustomFormat(e.target.value)}
+                    maxLength={formatOptions?.max_custom_chars ?? 2000}
+                    placeholder="Optional house style: headings, order, numbered impression…"
+                    rows={2}
+                  />
+                  <div className="format-custom-bar">
+                    <button type="button" className="text-link" onClick={() => persistCustomFormat(customFormat)}>Save</button>
+                    {savedCustom && <button type="button" className="text-link" onClick={() => persistCustomFormat('')}>Remove</button>}
+                    <span>{customFormat.length}/{formatOptions?.max_custom_chars ?? 2000}</span>
                   </div>
                 </div>
-                <textarea
-                  id="report-format"
-                  value={reportFormat}
-                  onChange={(e) => setReportFormat(e.target.value)}
-                  placeholder="Optional house style — headings, order, numbered impression…"
-                  rows={2}
-                />
               </div>
             )}
             <textarea
@@ -585,7 +632,7 @@ export default function PromptGeneratePage() {
             />
             <div className="composer-bar">
               <button type="button" className="text-link" onClick={() => setShowFormat((v) => !v)}>
-                {showFormat ? 'Hide format' : 'Add format'}
+                {showFormat ? 'Hide format' : 'Report format'}
               </button>
               <span className="hint">{prompt.length}/8000 · Ctrl+Enter</span>
               <DictationButton value={prompt} onUpdate={setPrompt} compact />

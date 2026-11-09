@@ -45,6 +45,7 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     is_locked = Column(Boolean, default=False, nullable=False)
     report_quota_start = Column(Integer, default=0, nullable=False)
+    custom_report_format = Column(Text, nullable=True)
     
     reports = relationship("Report", back_populates="user")
 

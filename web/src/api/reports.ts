@@ -1,4 +1,4 @@
-import type { ReviewFlag, ReviewStatus } from '../types'
+import type { ReportFormatOptions, ReviewFlag, ReviewStatus } from '../types'
 import { apiFetch, apiFetchBlob } from './client'
 import { getToken } from './client'
 import type {
@@ -92,6 +92,14 @@ export async function generateReport(
   })
 }
 
+export function getReportFormats(): Promise<ReportFormatOptions> {
+  return apiFetch('/api/report-formats')
+}
+
+export function saveCustomFormat(text: string): Promise<{ custom: string }> {
+  return apiFetch('/api/users/me/report-format', { method: 'PUT', body: JSON.stringify({ text }) })
+}
+
 export function getDraftFlags(draftId: number): Promise<ReviewFlag[]> {
   return apiFetch(`/api/reports/${draftId}/flags`)
 }
@@ -110,11 +118,11 @@ export function reviewDraftFlag(
 
 export async function generateAlternatives(
   prompt: string,
-  reportFormat?: string,
+  formatId?: string,
 ): Promise<PromptSession> {
   return apiFetch('/api/generate-alternatives', {
     method: 'POST',
-    body: JSON.stringify({ prompt, report_format: reportFormat || '' }),
+    body: JSON.stringify({ prompt, format_id: formatId }),
   })
 }
 

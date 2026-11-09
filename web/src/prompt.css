@@ -562,3 +562,12 @@
 .review-link { font-size: 0.75rem; text-decoration: underline; color: #475569; margin-left: 0.4rem; }
 .review-outstanding { display: block; margin-top: 0.4rem; color: #92400e; }
 @media (max-width: 900px) { .review-layout { grid-template-columns: minmax(0, 1fr); } }
+
+.format-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.4rem; margin-top: 0.4rem; }
+.format-option { text-align: left; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.4rem 0.55rem; background: #fff; font-size: 0.78rem; }
+.format-option small { display: block; color: #475569; }
+.format-option[aria-pressed="true"] { border-color: #0f766e; background: #f0fdfa; }
+.format-option:disabled { opacity: 0.5; cursor: not-allowed; }
+.format-override { margin: 0.4rem 0 0; padding: 0.35rem 0.55rem; border-radius: 6px; background: #fffbeb; color: #92400e; font-size: 0.78rem; }
+.format-custom { margin-top: 0.5rem; }
+.format-custom-bar { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: #475569; }

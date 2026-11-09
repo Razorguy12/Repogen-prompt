@@ -35,7 +35,26 @@ function Body({ text }: { text: string }) {
       list = null
     }
   }
+  let table: string[] = []
+  const flushTable = () => {
+    const rows = table
+      .filter((l) => !/^\s*\|?[\s:|-]+\|?\s*$/.test(l))
+      .map((l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim()))
+    table = []
+    if (!rows.length) return
+    const [head, ...body] = rows
+    blocks.push(
+      <div className="report-table-wrap" key={k++}>
+        <table>
+          <thead><tr>{head.map((c, i) => <th key={i}>{inline(c)}</th>)}</tr></thead>
+          <tbody>{body.map((r, i) => <tr key={i}>{head.map((_, j) => <td key={j}>{inline(r[j] ?? '')}</td>)}</tr>)}</tbody>
+        </table>
+      </div>,
+    )
+  }
   for (const line of text.split('\n')) {
+    if (line.trim().startsWith('|')) { flushPara(); flushList(); table.push(line); continue }
+    flushTable()
     const bullet = /^\s*[-*•]\s+(.*)$/.exec(line)
     const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line)
     if (!line.trim()) { flushPara(); flushList(); continue }
@@ -49,7 +68,7 @@ function Body({ text }: { text: string }) {
     flushList()
     para.push(line)
   }
-  flushPara(); flushList()
+  flushTable(); flushPara(); flushList()
   return <>{blocks}</>
 }
 

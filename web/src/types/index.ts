@@ -82,6 +82,9 @@ export interface FinalSummary {
   study_date: string
 }
 
+export interface ReportFormatPreset { id: string; label: string; description: string; format_text: string }
+export interface ReportFormatOptions { presets: ReportFormatPreset[]; default_id: string; custom: string; max_custom_chars: number }
+
 export type ReviewStatus = 'open' | 'confirmed' | 'corrected' | 'not_applicable'
 
 export interface ReviewFlag {
