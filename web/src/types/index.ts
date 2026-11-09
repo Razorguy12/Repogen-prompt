@@ -82,24 +82,6 @@ export interface FinalSummary {
   study_date: string
 }
 
-export interface ReportFormatPreset { id: string; label: string; description: string; format_text: string }
-export interface ReportFormatOptions { presets: ReportFormatPreset[]; default_id: string; custom: string; max_custom_chars: number }
-
-export type ReviewStatus = 'open' | 'confirmed' | 'corrected' | 'not_applicable'
-
-export interface ReviewFlag {
-  id: number
-  type: string
-  severity: 'high' | 'medium' | 'info'
-  raw_text: string
-  items: { text: string; status: ReviewStatus }[]
-  source: 'model' | 'server'
-  requires_review: boolean
-  status: ReviewStatus
-  reviewed_by: number | null
-  reviewed_at: string | null
-}
-
 export interface PromptSession {
   id: number
   created_at: string

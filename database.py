@@ -45,7 +45,6 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     is_locked = Column(Boolean, default=False, nullable=False)
     report_quota_start = Column(Integer, default=0, nullable=False)
-    custom_report_format = Column(Text, nullable=True)
     
     reports = relationship("Report", back_populates="user")
 
@@ -199,7 +198,7 @@ class FinalReport(TimestampMixin, Base):
     flags = Column(JSONType, nullable=False, default=list)
     flag_acknowledgements = Column(JSONType, nullable=False, default=list)  # [{flag, acknowledged_at}]
     flags_acknowledged_at = Column(UTCDateTime(), nullable=True)
-    prompt_version = Column(String(64), nullable=True)
+    prompt_version = Column(String(16), nullable=True)
     model_id = Column(String(120), nullable=True)
     finalized_at = Column(UTCDateTime(), nullable=False, default=utcnow)
 
@@ -218,29 +217,6 @@ class FinalReport(TimestampMixin, Base):
     )
 
 
-class ReportFlag(Base):
-    """A review item on a draft, shared by all three alternatives."""
-    __tablename__ = "report_flags"
-
-    id = Column(Integer, primary_key=True)
-    draft_id = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
-    type = Column(String(32), nullable=False)
-    severity = Column(String(8), nullable=False)
-    raw_text = Column(Text, nullable=False)
-    items = Column(JSONType, nullable=False, default=list)  # [{text, status}]
-    source = Column(String(8), nullable=False)
-    requires_review = Column(Boolean, nullable=False)
-    status = Column(String(16), nullable=False, default="open")
-    reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    reviewed_at = Column(UTCDateTime(), nullable=True)
-    created_at = Column(UTCDateTime(), nullable=False, default=utcnow, server_default=func.now())
-
-    __table_args__ = (
-        CheckConstraint("status IN ('open', 'confirmed', 'corrected', 'not_applicable')", name="ck_report_flags_status"),
-        CheckConstraint("source IN ('model', 'server')", name="ck_report_flags_source"),
-    )
-
-
 class Comparison(TimestampMixin, Base):
     __tablename__ = "comparisons"
 
@@ -253,7 +229,7 @@ class Comparison(TimestampMixin, Base):
     edited_summary = Column(Text, nullable=True)
     edited_impression = Column(JSONType, nullable=True)
     status = Column(String(8), nullable=False, default="draft")
-    prompt_version = Column(String(64), nullable=True)
+    prompt_version = Column(String(16), nullable=True)
     model_id = Column(String(120), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 

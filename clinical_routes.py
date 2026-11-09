@@ -20,8 +20,7 @@ import auth
 import clinical
 import model.model as model
 from audit_service import log_audit_event
-from database import Comparison, FinalReport, Patient, Report, ReportFlag, User, get_db, iso_utc, utcnow
-from model.flags import SEVERITY_ORDER, rollup_status
+from database import Comparison, FinalReport, Patient, Report, User, get_db, iso_utc, utcnow
 from rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/api")
@@ -157,69 +156,6 @@ def _bad(detail: str, code: int = 422):
     raise HTTPException(status_code=code, detail=detail)
 
 
-# --------------------------------------------------------------------------- review flags
-
-class FlagReview(BaseModel):
-    status: Literal["open", "confirmed", "corrected", "not_applicable"]
-    item_index: Optional[int] = Field(default=None, ge=0)  # None applies to every item
-
-
-def flag_payload(flag: ReportFlag) -> dict:
-    return {
-        "id": flag.id, "type": flag.type, "severity": flag.severity, "raw_text": flag.raw_text, "items": flag.items,
-        "source": flag.source, "requires_review": flag.requires_review, "status": flag.status,
-        "reviewed_by": flag.reviewed_by, "reviewed_at": iso_utc(flag.reviewed_at),
-    }
-
-
-def _own_draft(db: Session, user: User, draft_id: int) -> Report:
-    draft = db.query(Report).filter(Report.id == draft_id, Report.user_id == user.id).first()
-    if not draft:
-        raise HTTPException(status_code=404, detail="Draft not found")
-    return draft
-
-
-def _draft_flags(db: Session, draft_id: int) -> list[ReportFlag]:
-    rows = db.query(ReportFlag).filter(ReportFlag.draft_id == draft_id).order_by(ReportFlag.id).all()
-    return sorted(rows, key=lambda f: SEVERITY_ORDER.get(f.severity, 9))
-
-
-@router.get("/reports/{draft_id}/flags")
-def list_flags(draft_id: int, db: Session = Depends(get_db), user: User = Depends(auth.get_current_user)):
-    _own_draft(db, user, draft_id)
-    return [flag_payload(f) for f in _draft_flags(db, draft_id)]
-
-
-@router.post("/reports/{draft_id}/flags/{flag_id}/review")
-def review_flag(draft_id: int, flag_id: int, body: FlagReview, request: Request, db: Session = Depends(get_db),
-                user: User = Depends(auth.get_current_user)):
-    draft = _own_draft(db, user, draft_id)
-    if draft.status == "final":
-        _bad("This draft has been finalized", 409)
-    flag = db.query(ReportFlag).filter(ReportFlag.id == flag_id, ReportFlag.draft_id == draft_id).first()
-    if not flag:
-        raise HTTPException(status_code=404, detail="Flag not found")
-    if not flag.requires_review:
-        _bad("This flag does not need review", 409)
-    if body.item_index is not None and body.item_index >= len(flag.items):
-        _bad("Unknown flag item")
-    flag.items = [
-        {**item, "status": body.status}
-        if body.item_index == i or (body.item_index is None and (item["status"] == "open" or body.status == "open"))
-        else item
-        for i, item in enumerate(flag.items)
-    ]
-    flag.status = rollup_status(flag.items)
-    reviewed = flag.status != "open"
-    flag.reviewed_by = user.id if reviewed else None
-    flag.reviewed_at = utcnow() if reviewed else None
-    db.commit()
-    db.refresh(flag)
-    log_audit_event(db, "REPORT_FLAG_REVIEWED", user_id=user.id, request=request, resource_type="report_flag",
-                    resource_id=flag.id, details={"status": body.status, "operation": flag.type})
-    return flag_payload(flag)
-
-
 # --------------------------------------------------------------------------- patients
 
 @router.get("/patients")
@@ -326,29 +262,16 @@ def finalize_draft(draft_id: int, body: FinalizeRequest, request: Request, db: S
     if not variant or not (variant.get("full_report") or "").strip():
         _bad("The selected report is empty")
 
+    # Flags: every flag stored with the draft must be acknowledged.
+    flags = params.get("flags") or []
     now = utcnow()
-    review_flags = _draft_flags(db, draft.id)
-    if review_flags:
-        outstanding = [f for f in review_flags if f.requires_review and f.status == "open"]
-        if outstanding:
-            raise HTTPException(status_code=409, detail={
-                "code": "flags_outstanding",
-                "message": "Review every flagged item before finalizing",
-                "outstanding": [flag_payload(f) for f in outstanding],
-            })
-        flags = [f.raw_text for f in review_flags]
-        ack_records = [{"flag": f.raw_text, "status": f.status, "acknowledged_at": iso_utc(f.reviewed_at or now)}
-                       for f in review_flags]
-    else:
-        # Drafts from before the review panel keep the acknowledge-each-flag check.
-        flags = params.get("flags") or []
-        acks = {a.index: a.acknowledged_at for a in body.flag_acknowledgements}
-        if any(i not in acks for i in range(len(flags))):
-            _bad("Acknowledge every flag before finalizing")
-        ack_records = []
-        for i, flag in enumerate(flags):
-            at = acks[i] if acks[i].tzinfo else acks[i].replace(tzinfo=dt.timezone.utc)
-            ack_records.append({"flag": flag, "acknowledged_at": iso_utc(min(at, now))})
+    acks = {a.index: a.acknowledged_at for a in body.flag_acknowledgements}
+    if any(i not in acks for i in range(len(flags))):
+        _bad("Acknowledge every flag before finalizing")
+    ack_records = []
+    for i, flag in enumerate(flags):
+        at = acks[i] if acks[i].tzinfo else acks[i].replace(tzinfo=dt.timezone.utc)
+        ack_records.append({"flag": flag, "acknowledged_at": iso_utc(min(at, now))})
 
     for err in (clinical.validate_age(body.age_value, body.age_unit), clinical.validate_study_date(body.study_date)):
         if err:

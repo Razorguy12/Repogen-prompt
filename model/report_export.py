@@ -47,29 +47,12 @@ class ExportDocument:
 # ---------------------------------------------------------------- shared helpers
 
 _LIST_RE = re.compile(r"^\s*(?:([-*•])|(\d+[.)]))\s+(.*)$")
-_TABLE_SEP = re.compile(r"^\s*\|?[\s:|-]+\|?\s*$")
 _INLINE_RE = re.compile(r"(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)")
 
 
-def _table_rows(lines: list[str]) -> list[list[str]]:
-    """Markdown table lines to rows of equal length; the separator row is dropped."""
-    rows = [[c.strip() for c in ln.strip().strip("|").split("|")] for ln in lines if not _TABLE_SEP.match(ln)]
-    cols = max((len(r) for r in rows), default=0)
-    return [r + [""] * (cols - len(r)) for r in rows]
-
-
 def _blocks(body: str):
-    """Yield ("p", text) | ("bullet", text) | ("number", "1.", text) | ("table", rows) in order."""
-    table: list[str] = []
-    for line in [*body.split("\n"), ""]:
-        if line.strip().startswith("|"):
-            table.append(line)
-            continue
-        if table:
-            rows = _table_rows(table)
-            if rows:
-                yield ("table", rows)
-            table = []
+    """Yield ("p", text) | ("bullet", text) | ("number", "1.", text) per non-empty line."""
+    for line in body.split("\n"):
         if not line.strip():
             continue
         m = _LIST_RE.match(line)
@@ -138,18 +121,7 @@ def build_pdf(doc: ExportDocument, filename: str) -> str:
     def body_flowables(body: str):
         items = []
         for block in _blocks(body):
-            if block[0] == "table":
-                rows = block[1]
-                data = [[Paragraph(f"<b>{_rl_markup(c)}</b>" if r == 0 else _rl_markup(c), body_style) for c in row]
-                        for r, row in enumerate(rows)]
-                grid = Table(data, colWidths=[width / len(rows[0])] * len(rows[0]), repeatRows=1)
-                grid.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(LABEL_BG)),
-                    ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor(RULE)),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ]))
-                items.append(grid)
-            elif block[0] == "bullet":
+            if block[0] == "bullet":
                 items.append(Paragraph(_rl_markup(block[1]), list_style, bulletText="•"))
             elif block[0] == "number":
                 items.append(Paragraph(_rl_markup(block[2]), list_style, bulletText=block[1]))
@@ -297,16 +269,6 @@ def build_docx(doc: ExportDocument, filename: str) -> str:
             first_para = h
             _indent(h, fill)
         for block in _blocks(section.body):
-            if block[0] == "table":
-                rows = block[1]
-                grid = word.add_table(rows=len(rows), cols=len(rows[0]))
-                _light_borders(grid)
-                for r, row in enumerate(rows):
-                    for c, value in enumerate(row):
-                        para = grid.cell(r, c).paragraphs[0]
-                        for chunk, bold, italic in _runs(value):
-                            _set_run(para.add_run(chunk), 10, BODY, bold=bold or r == 0, italic=italic)
-                continue
             if block[0] == "bullet":
                 p = word.add_paragraph(style="List Bullet")
                 text = block[1]

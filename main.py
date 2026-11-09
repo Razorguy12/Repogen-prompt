@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
 import os
 import io
@@ -14,11 +14,9 @@ from dotenv import load_dotenv
 from groq import Groq
 import pdfplumber
 import model.model as model
-from model import formats
-from model.flags import build_flag_records
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_, desc, asc
-from database import (engine, Base, get_db, User, Report, AuditEvent, Patient, FinalReport, ReportFlag, upgrade_schema,
+from database import (engine, Base, get_db, User, Report, AuditEvent, Patient, FinalReport, upgrade_schema,
                       iso_utc)
 import auth
 from audit_service import log_audit_event, csv_safe_cell
@@ -394,6 +392,7 @@ async def generate_report(request: ReportRequest, http_request: Request, current
         raise
     try:
         combined_input = f"""
+        Patient Information: {request.patient_info}
         Study Information: {request.study_info}
         Clinical Information: {request.clinical_info or 'Not provided'}
         Radiologist Findings: {request.radiologist_findings or 'Not provided'}
@@ -446,11 +445,7 @@ async def generate_report(request: ReportRequest, http_request: Request, current
 
 class PromptRequest(BaseModel):
     prompt: str
-    format_id: Optional[str] = None
-
-
-class CustomFormatUpdate(BaseModel):
-    text: str = Field(default="", max_length=formats.CUSTOM_FORMAT_MAX_CHARS)
+    report_format: Optional[str] = None
 
 
 class PromptSessionResponse(BaseModel):
@@ -478,7 +473,6 @@ def persist_prompt_session(
     report_format: Optional[str],
     alternatives: model.ReportAlternatives,
     selected: str = "standard",
-    format_id: Optional[str] = None,
 ) -> Report:
     ensure_user_can_generate(db, user)
     chosen = next((r for r in alternatives.reports if r.type == selected), alternatives.reports[1])
@@ -488,13 +482,12 @@ def persist_prompt_session(
         "kind": "prompt",
         "prompt": prompt,
         "report_format": report_format or "",
-        "format_id": format_id,
         "selected": chosen.type,
         "alternatives": [r.model_dump() for r in alternatives.reports],
         "exam": alternatives.exam.model_dump(),
         "flags": alternatives.flags,
         "prompt_version": model.current_prompt_version(),
-        "model_id": model.active_model(),
+        "model_id": model.GROQ_MODEL,
     })
     db_report = Report(
         user_id=user.id,
@@ -508,10 +501,6 @@ def persist_prompt_session(
         input_params=input_params,
     )
     db.add(db_report)
-    if model.report_engine() == "v2":
-        db.flush()
-        for record in build_flag_records(alternatives.flags, alternatives.validation_warnings):
-            db.add(ReportFlag(draft_id=db_report.id, **record))
     update_automatic_lock(db, user)
     db.commit()
     db.refresh(db_report)
@@ -541,22 +530,6 @@ def session_payload(report: Report) -> dict:
     }
 
 
-@app.get("/api/report-formats")
-async def report_formats(current_user: User = Depends(auth.get_current_user)):
-    return {"presets": formats.presets_payload(), "default_id": formats.DEFAULT_FORMAT_ID,
-            "custom": current_user.custom_report_format or "", "max_custom_chars": formats.CUSTOM_FORMAT_MAX_CHARS}
-
-
-@app.put("/api/users/me/report-format")
-async def save_custom_format(body: CustomFormatUpdate, request: Request, db: Session = Depends(get_db),
-                             current_user: User = Depends(auth.get_current_user)):
-    current_user.custom_report_format = body.text.strip() or None
-    db.commit()
-    log_audit_event(db, "USER_UPDATED", user_id=current_user.id, request=request, resource_type="user",
-                    resource_id=current_user.id, details={"operation": "report_format"})
-    return {"custom": current_user.custom_report_format or ""}
-
-
 @app.post("/api/generate-alternatives", response_model=PromptSessionResponse)
 async def generate_alternatives(
     request: PromptRequest,
@@ -573,12 +546,9 @@ async def generate_alternatives(
         raise HTTPException(status_code=400, detail="Prompt is empty")
     try:
         ensure_user_can_generate(db, current_user)
-        chosen_format = formats.resolve_format(current_user.custom_report_format, request.format_id)
-        alternatives = model.generate_reports(request.prompt.strip(), chosen_format.text,
-                                              check_fields=chosen_format.check_fields)
+        alternatives = model.generate_reports(request.prompt.strip(), request.report_format)
         saved = persist_prompt_session(
-            db, current_user, request.prompt.strip(), chosen_format.text, alternatives,
-            format_id=chosen_format.format_id,
+            db, current_user, request.prompt.strip(), request.report_format, alternatives
         )
         log_audit_event(db, "REPORT_GENERATED", user_id=current_user.id, request=http_request,
                         details={"workflow": "prompt", "variants": len(alternatives.reports)},
@@ -719,6 +689,7 @@ async def generate_report_with_pdf(request: ReportRequest, http_request: Request
         raise
     try:
         combined_input = f"""
+        Patient Information: {request.patient_info}
         Study Information: {request.study_info}
         Clinical Information: {request.clinical_info or 'Not provided'}
         Radiologist Findings: {request.radiologist_findings or 'Not provided'}

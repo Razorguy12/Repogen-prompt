@@ -8,23 +8,18 @@ import {
   downloadAlternativeDocx,
   downloadAlternativePdf,
   generateAlternatives,
-  getDraftFlags,
   getReport,
-  getReportFormats,
   getReports,
-  reviewDraftFlag,
-  saveCustomFormat,
   updatePromptDraft,
 } from '../api/reports'
 import { getFinalReportForDraft } from '../api/clinical'
 import { FinalizeModal } from '../components/FinalizeModal'
 import { copyText } from '../lib/clipboard'
-import type { PromptSession, ReportAlternative, ReportSummary, ReviewFlag, ReviewStatus } from '../types'
+import type { PromptSession, ReportAlternative, ReportSummary } from '../types'
 import { ApiError } from '../api/client'
 import { ReportDocument } from '../components/ReportDocument'
 import { bodyWordCount } from '../lib/reportSections'
 import { FlagsPanel } from '../components/FlagsPanel'
-import { ReviewPanel, type PendingCorrection } from '../components/ReviewPanel'
 import { ExamChip } from '../components/ExamChip'
 import { InputTips } from '../components/InputTips'
 import { displayRange, parseUtc } from '../lib/reportText'
@@ -34,19 +29,29 @@ const examples = [
   {
     label: 'CT brain',
     prompt: 'CT brain plain. 3.4 × 2.3 cm extra-axial lesion along the right frontal convexity, suspected meningioma. Headache 2 weeks.',
+    format: 'Title\nClinical Details\nProtocol\nObservations\nImpression',
   },
   {
     label: 'MRI lumbar',
     prompt: 'MRI lumbar spine: L4–L5 disc bulge compressing the left traversing nerve root. Low back pain radiating to left leg.',
+    format: 'EXAMINATION\nTECHNIQUE\nFINDINGS (by level)\nIMPRESSION (numbered)',
   },
   {
     label: 'Chest X-ray',
     prompt: 'Chest X-ray PA: right lower zone opacity with blunting of the right costophrenic angle. Fever and cough 5 days.',
+    format: 'Study\nClinical history\nFindings\nImpression',
   },
   {
     label: 'USG abdomen',
     prompt: 'USG abdomen: 12 mm gallstone in the gallbladder lumen, no wall thickening, no pericholecystic fluid. Right upper quadrant pain.',
+    format: 'Organ-wise: Liver, Gallbladder, Pancreas, Spleen, Kidneys, Impression',
   },
+]
+
+const formatPresets = [
+  { label: 'Classic', text: 'Title\nClinical Details\nProtocol\nObservations\nImpression' },
+  { label: 'Numbered impression', text: 'Examination\nTechnique\nFindings\nImpression (numbered list)\nRecommendation' },
+  { label: 'Organ-wise', text: 'Clinical indication\nTechnique\nFindings by organ / region\nImpression' },
 ]
 
 const typeLabel: Record<string, string> = { concise: 'Concise', standard: 'Standard', detailed: 'Detailed' }
@@ -88,17 +93,6 @@ function sessionFromSummary(r: ReportSummary): PromptSession | null {
   }
 }
 
-const FORMAT_KEY = 'report_format_id'
-
-function readSavedFormatId(): string {
-  try {
-    const saved = localStorage.getItem(FORMAT_KEY)
-    return !saved || saved === 'organwise' ? 'structured' : saved
-  } catch {
-    return 'structured'
-  }
-}
-
 export default function PromptGeneratePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -107,8 +101,7 @@ export default function PromptGeneratePage() {
   const requestedId = Number(params.get('id') || 0)
 
   const [prompt, setPrompt] = useState('')
-  const [formatId, setFormatId] = useState(readSavedFormatId)
-  const [customFormat, setCustomFormat] = useState('')
+  const [reportFormat, setReportFormat] = useState('')
   const [showFormat, setShowFormat] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -119,9 +112,6 @@ export default function PromptGeneratePage() {
   // Flag acknowledgements for the open draft: index -> ISO timestamp.
   const [acks, setAcks] = useState<Record<number, string>>({})
   const [finalizeOpen, setFinalizeOpen] = useState(false)
-  const [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([])
-  const [pendingCorrections, setPendingCorrections] = useState<PendingCorrection[]>([])
-  const editorRef = useRef<HTMLTextAreaElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
 
@@ -130,32 +120,6 @@ export default function PromptGeneratePage() {
     queryFn: getReports,
     enabled: !!token,
   })
-
-  const { data: formatOptions } = useQuery({
-    queryKey: ['report-formats', token],
-    queryFn: getReportFormats,
-    enabled: !!token,
-  })
-  const savedCustom = !!formatOptions?.custom
-
-  useEffect(() => {
-    if (formatOptions) setCustomFormat(formatOptions.custom)
-  }, [formatOptions])
-
-  const chooseFormat = (id: string) => {
-    setFormatId(id)
-    try { localStorage.setItem(FORMAT_KEY, id) } catch { /* the choice just is not remembered */ }
-  }
-
-  const persistCustomFormat = async (text: string) => {
-    try {
-      await saveCustomFormat(text)
-      queryClient.invalidateQueries({ queryKey: ['report-formats'] })
-      toast.success(text.trim() ? 'Custom format saved' : 'Custom format removed')
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Could not save the format')
-    }
-  }
 
   const history = useMemo(() => {
     return reports
@@ -178,45 +142,11 @@ export default function PromptGeneratePage() {
 
   const current = session?.reports[active]
   const flags = session?.flags ?? []
-  // Drafts with review records use the panel; older drafts keep per-flag acknowledgement.
-  const gated = reviewFlags.length > 0
-  const outstanding = reviewFlags.filter((f) => f.requires_review && f.status === 'open')
-  const allFlagsAcknowledged = gated ? outstanding.length === 0 : flags.every((_, i) => !!acks[i])
+  const allFlagsAcknowledged = flags.every((_, i) => !!acks[i])
 
   useEffect(() => {
     setAcks({})
-    setPendingCorrections([])
-    setReviewFlags([])
-    if (!session?.id) return
-    let cancelled = false
-    getDraftFlags(session.id)
-      .then((rows) => { if (!cancelled) setReviewFlags(rows) })
-      .catch(() => toast.error('Could not load the review items'))
-    return () => { cancelled = true }
   }, [session?.id])
-
-  const applyReview = async (flag: ReviewFlag, status: ReviewStatus, itemIndex: number | null) => {
-    if (!session) return
-    const updated = await reviewDraftFlag(session.id, flag.id, status, itemIndex)
-    setReviewFlags((rows) => rows.map((r) => (r.id === updated.id ? updated : r)))
-  }
-
-  const handleReview = (flag: ReviewFlag, status: ReviewStatus, itemIndex: number | null) => {
-    applyReview(flag, status, itemIndex).catch((err) =>
-      toast.error(err instanceof ApiError ? err.message : 'Could not save that review'))
-  }
-
-  const handleCorrect = (flag: ReviewFlag, itemIndex: number | null, text: string) => {
-    setPendingCorrections((p) => [...p, { flagId: flag.id, itemIndex }])
-    setEditing(true)
-    window.setTimeout(() => {
-      const box = editorRef.current
-      if (!box) return
-      box.focus()
-      const at = box.value.toLowerCase().indexOf(text.toLowerCase())
-      if (at >= 0) box.setSelectionRange(at, at + text.length)
-    }, 0)
-  }
 
   useEffect(() => {
     if (current) setDraftText(current.full_report)
@@ -239,6 +169,7 @@ export default function PromptGeneratePage() {
         }
         setSession(loaded)
         setPrompt(loaded.prompt)
+        setReportFormat(loaded.report_format || '')
         const idx = loaded.reports.findIndex((r) => r.type === loaded.selected)
         setActive(idx >= 0 ? idx : 1)
         setEditing(false)
@@ -261,6 +192,7 @@ export default function PromptGeneratePage() {
   const startNew = () => {
     setSession(null)
     setPrompt('')
+    setReportFormat('')
     setEditing(false)
     setActive(1)
     setParams({}, { replace: true })
@@ -273,14 +205,10 @@ export default function PromptGeneratePage() {
       toast.error('Describe the study and findings first')
       return
     }
-    if (session && session.status !== 'final' && reviewFlags.length > 0
-      && !window.confirm('Generate again? This creates a new draft with new flags to review. Your review of this draft does not carry over.')) {
-      return
-    }
     setLoading(true)
     setEditing(false)
     try {
-      const result = await generateAlternatives(prompt.trim(), formatId)
+      const result = await generateAlternatives(prompt.trim(), reportFormat.trim())
       applySession(result)
       toast.success('Three drafts are ready — pick one')
     } catch (err) {
@@ -310,12 +238,6 @@ export default function PromptGeneratePage() {
     try {
       const next = await updatePromptDraft(session.id, { selected: current.type, report: updated })
       applySession(next, false)
-      const corrections = pendingCorrections
-      for (const c of corrections) {
-        const flag = reviewFlags.find((f) => f.id === c.flagId)
-        if (flag) await applyReview(flag, 'corrected', c.itemIndex)
-      }
-      setPendingCorrections([])
       toast.success('Edits saved')
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Save failed')
@@ -335,10 +257,6 @@ export default function PromptGeneratePage() {
     if (!session || !current) return
     if (current.type !== session.selected) {
       toast.error('Select this variant first')
-      return
-    }
-    if (gated && outstanding.length > 0) {
-      document.getElementById('review-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
     if (editing && draftText !== current.full_report) {
@@ -441,6 +359,7 @@ export default function PromptGeneratePage() {
                     className="example-card"
                     onClick={() => {
                       setPrompt(ex.prompt)
+                      setReportFormat(ex.format)
                       composerRef.current?.focus()
                     }}
                   >
@@ -467,7 +386,7 @@ export default function PromptGeneratePage() {
 
               <article className="bubble assistant">
                 <div className="bubble-meta">repogen · three drafts</div>
-                {!gated && <FlagsPanel
+                <FlagsPanel
                   flags={flags}
                   acknowledged={acks}
                   onToggle={session.status === 'final' ? undefined : (i, checked) =>
@@ -477,7 +396,7 @@ export default function PromptGeneratePage() {
                       else delete next[i]
                       return next
                     })}
-                />}
+                />
                 <div className="variant-tabs" role="tablist">
                   {session.reports.map((r, i) => (
                     <button
@@ -495,7 +414,6 @@ export default function PromptGeneratePage() {
                 </div>
 
                 {current && (
-                  <div className={gated ? 'review-layout' : undefined}>
                   <div className="report-sheet">
                     <header>
                       <div>
@@ -514,7 +432,7 @@ export default function PromptGeneratePage() {
 
                     {editing ? (
                       <div className="editor">
-                        <textarea ref={editorRef} value={draftText} onChange={(e) => setDraftText(e.target.value)} />
+                        <textarea value={draftText} onChange={(e) => setDraftText(e.target.value)} />
                         <button type="button" className="accent" onClick={saveEdits}>Save edits to this draft</button>
                       </div>
                     ) : (
@@ -532,31 +450,15 @@ export default function PromptGeneratePage() {
                         : (
                           <button
                             type="button"
-                            className={`text-link ${allFlagsAcknowledged ? '' : 'opacity-50'}`}
+                            className="text-link disabled:opacity-50 disabled:cursor-not-allowed"
                             onClick={finalize}
-                            aria-disabled={!allFlagsAcknowledged}
-                            disabled={!gated && !allFlagsAcknowledged}
-                            title={allFlagsAcknowledged ? 'Finalize this report' : 'Review every flagged item before finalizing'}
+                            disabled={!allFlagsAcknowledged}
+                            title={allFlagsAcknowledged ? 'Finalize this report' : 'Acknowledge every flag above before finalizing'}
                           >
                             Mark as final
                           </button>
                         )}
-                      {gated && outstanding.length > 0 && session?.status !== 'final' && (
-                        <span className="review-outstanding">
-                          Still to review: {outstanding.map((f) => f.items.length === 1 ? f.items[0].text : f.type.replace('_', ' ')).join('; ')}
-                        </span>
-                      )}
                     </footer>
-                  </div>
-                  {gated && (
-                    <ReviewPanel
-                      flags={reviewFlags}
-                      pending={pendingCorrections}
-                      readOnly={session.status === 'final'}
-                      onReview={handleReview}
-                      onCorrect={handleCorrect}
-                    />
-                  )}
                   </div>
                 )}
               </article>
@@ -581,41 +483,21 @@ export default function PromptGeneratePage() {
           <div className="composer-box">
             {showFormat && (
               <div className="format-field">
-                <div className="format-head"><label>Report format</label></div>
-                {customFormat.trim() !== '' && savedCustom && (
-                  <p className="format-override">Your custom format is in use and overrides these presets.</p>
-                )}
-                <div className="format-options">
-                  {(formatOptions?.presets ?? []).map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className="format-option"
-                      aria-pressed={!savedCustom && formatId === p.id}
-                      disabled={savedCustom}
-                      onClick={() => chooseFormat(p.id)}
-                    >
-                      <strong>{p.label}</strong>
-                      <small>{p.description}</small>
-                    </button>
-                  ))}
-                </div>
-                <div className="format-custom">
-                  <label htmlFor="report-format">My custom format</label>
-                  <textarea
-                    id="report-format"
-                    value={customFormat}
-                    onChange={(e) => setCustomFormat(e.target.value)}
-                    maxLength={formatOptions?.max_custom_chars ?? 2000}
-                    placeholder="Optional house style: headings, order, numbered impression…"
-                    rows={2}
-                  />
-                  <div className="format-custom-bar">
-                    <button type="button" className="text-link" onClick={() => persistCustomFormat(customFormat)}>Save</button>
-                    {savedCustom && <button type="button" className="text-link" onClick={() => persistCustomFormat('')}>Remove</button>}
-                    <span>{customFormat.length}/{formatOptions?.max_custom_chars ?? 2000}</span>
+                <div className="format-head">
+                  <label htmlFor="report-format">Report format</label>
+                  <div className="preset-row">
+                    {formatPresets.map((p) => (
+                      <button key={p.label} type="button" onClick={() => setReportFormat(p.text)}>{p.label}</button>
+                    ))}
                   </div>
                 </div>
+                <textarea
+                  id="report-format"
+                  value={reportFormat}
+                  onChange={(e) => setReportFormat(e.target.value)}
+                  placeholder="Optional house style — headings, order, numbered impression…"
+                  rows={2}
+                />
               </div>
             )}
             <textarea
@@ -632,7 +514,7 @@ export default function PromptGeneratePage() {
             />
             <div className="composer-bar">
               <button type="button" className="text-link" onClick={() => setShowFormat((v) => !v)}>
-                {showFormat ? 'Hide format' : 'Report format'}
+                {showFormat ? 'Hide format' : 'Add format'}
               </button>
               <span className="hint">{prompt.length}/8000 · Ctrl+Enter</span>
               <DictationButton value={prompt} onUpdate={setPrompt} compact />
