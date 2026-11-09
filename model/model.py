@@ -287,6 +287,8 @@ def _v2_request(client, messages: list[dict], max_tokens: int):
             )
         except Exception as exc:
             status = getattr(exc, "status_code", None)
+            if status == 413:  # request exceeds the account's token limit; waiting cannot fix it
+                raise ProviderBusyError("Provider limit: HTTP 413") from exc
             if status == 400:
                 raise ValueError("The provider rejected the output as not matching the schema.") from exc
             if status == 429 or (status is not None and status >= 500):

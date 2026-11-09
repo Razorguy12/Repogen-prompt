@@ -103,3 +103,10 @@ def test_comparison_settings_are_unchanged():
     m._chat_completion(c, MSGS)
     assert c.calls[0]["model"] == m.GROQ_MODEL and c.calls[0]["temperature"] == 0.2
     assert c.calls[0]["response_format"] == {"type": "json_object"}
+
+
+def test_413_reports_provider_limit_without_retrying(sleeps):
+    c = Client(Err(413))
+    with pytest.raises(m.ProviderBusyError):
+        m.generate_v2(c, MSGS)
+    assert len(c.calls) == 1 and sleeps == []
