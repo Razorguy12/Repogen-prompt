@@ -22,6 +22,7 @@ from functools import lru_cache
 from pathlib import Path
 
 PROMPT_PATH = Path(__file__).parent / "system_prompt.txt"
+LEGACY_PROMPT_PATH = Path(__file__).parent / "system_prompt_legacy.txt"
 _HEADER_RE = re.compile(r"(\n=+\n(\d+b?)\. [^\n]*\n=+\n)")
 
 # Section-7 groups: sub-section numbers and the input keywords that select them.
@@ -166,9 +167,18 @@ def _trim_section7(body: str, haystack: str) -> str:
 
 # ----------------------------------------------------------------- public
 
-@lru_cache(maxsize=1)
+def report_engine() -> str:
+    """'v2' (default) or 'legacy', the rollback to the previous prompt and settings."""
+    return "legacy" if os.getenv("REPORT_ENGINE", "v2").strip().lower() == "legacy" else "v2"
+
+
+@lru_cache(maxsize=2)
+def _load_prompt(path: Path) -> str:
+    return path.read_text(encoding="utf-8").strip()
+
+
 def full_prompt() -> str:
-    return PROMPT_PATH.read_text(encoding="utf-8").strip()
+    return _load_prompt(LEGACY_PROMPT_PATH if report_engine() == "legacy" else PROMPT_PATH)
 
 
 def trimming_enabled() -> bool:

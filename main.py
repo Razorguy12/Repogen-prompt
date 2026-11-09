@@ -392,7 +392,6 @@ async def generate_report(request: ReportRequest, http_request: Request, current
         raise
     try:
         combined_input = f"""
-        Patient Information: {request.patient_info}
         Study Information: {request.study_info}
         Clinical Information: {request.clinical_info or 'Not provided'}
         Radiologist Findings: {request.radiologist_findings or 'Not provided'}
@@ -487,7 +486,7 @@ def persist_prompt_session(
         "exam": alternatives.exam.model_dump(),
         "flags": alternatives.flags,
         "prompt_version": model.current_prompt_version(),
-        "model_id": model.GROQ_MODEL,
+        "model_id": model.active_model(),
     })
     db_report = Report(
         user_id=user.id,
@@ -689,7 +688,6 @@ async def generate_report_with_pdf(request: ReportRequest, http_request: Request
         raise
     try:
         combined_input = f"""
-        Patient Information: {request.patient_info}
         Study Information: {request.study_info}
         Clinical Information: {request.clinical_info or 'Not provided'}
         Radiologist Findings: {request.radiologist_findings or 'Not provided'}

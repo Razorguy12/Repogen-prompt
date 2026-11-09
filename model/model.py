@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
@@ -123,16 +125,23 @@ def _is_provider_limit(exc: Exception) -> bool:
 
 
 PROMPT_VERSION = "2026-11-any-modality-v1"
+LEGACY_PROMPT_VERSION = "v2"
 
 
 def current_prompt_version() -> str:
     """Version stored with each draft; '+trim' marks per-request trimmed prompts (prompt_builder)."""
-    return f"{PROMPT_VERSION}+trim" if trimming_enabled() else PROMPT_VERSION
+    version = LEGACY_PROMPT_VERSION if report_engine() == "legacy" else PROMPT_VERSION
+    return f"{version}+trim" if trimming_enabled() else version
+
+
+def active_model() -> str:
+    """Model id stored with each draft."""
+    return GROQ_MODEL if report_engine() == "legacy" else os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 SCHEMA_RETRY_INSTRUCTION = (
     "Your previous output was not valid JSON matching the schema. Return valid JSON only."
 )
 
-from model.prompt_builder import build_system_prompt, full_prompt, trimming_enabled  # noqa: E402
+from model.prompt_builder import build_system_prompt, full_prompt, report_engine, trimming_enabled  # noqa: E402
 
 SYSTEM_PROMPT = full_prompt()  # full text; requests use build_system_prompt()
 
@@ -213,6 +222,108 @@ def generate_validated(client, messages: list[dict], parser):
         raise GenerationError("Model output failed schema validation twice") from exc
 
 
+# --------------------------------------------------------------- v2 engine
+
+LLM_TIMEOUT_SECONDS = 60
+MAX_PROVIDER_ATTEMPTS = 3
+MAX_COMPLETION_CAP = 12_000
+
+_STR = {"type": "string"}
+_REPORT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["type", "word_limit", "title", "clinical_details", "protocol", "observations", "impression",
+                 "full_report"],
+    "properties": {
+        "type": {"type": "string", "enum": EXPECTED_ORDER},
+        **{k: _STR for k in ("word_limit", "title", "clinical_details", "protocol", "observations", "impression",
+                             "full_report")},
+    },
+}
+GENERATION_JSON_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["exam", "reports", "flags"],
+    "properties": {
+        "exam": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["modality", "region", "laterality"],
+            "properties": {
+                "modality": {"type": "string", "enum": list(MODALITIES)},
+                "region": _STR,
+                "laterality": {"type": "string", "enum": list(LATERALITIES)},
+            },
+        },
+        "reports": {"type": "array", "items": _REPORT_SCHEMA},
+        "flags": {"type": "array", "items": _STR},
+    },
+}
+
+
+def _retry_delay(exc: Exception, attempt: int) -> float:
+    """Seconds to wait: the provider's retry-after if given, else exponential backoff with jitter."""
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    try:
+        return max(0.0, float(headers.get("retry-after")))
+    except (TypeError, ValueError):
+        return (2 ** attempt) * 0.5 + random.uniform(0, 0.5)
+
+
+def _v2_request(client, messages: list[dict], max_tokens: int):
+    """One completion, retrying 429 and 5xx. Schema rejections surface as ValueError."""
+    for attempt in range(MAX_PROVIDER_ATTEMPTS):
+        try:
+            return client.chat.completions.create(
+                model=active_model(),
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.15")),
+                max_completion_tokens=max_tokens,
+                reasoning_effort=os.getenv("LLM_REASONING_EFFORT", "medium"),
+                response_format={"type": "json_schema", "json_schema": {
+                    "name": "radiology_reports", "strict": True, "schema": GENERATION_JSON_SCHEMA}},
+                messages=messages,
+                timeout=LLM_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status == 400:
+                raise ValueError("The provider rejected the output as not matching the schema.") from exc
+            if status == 429 or (status is not None and status >= 500):
+                if attempt + 1 == MAX_PROVIDER_ATTEMPTS:
+                    raise ProviderBusyError(f"Provider unavailable: HTTP {status}") from exc
+                time.sleep(_retry_delay(exc, attempt))
+                continue
+            raise GenerationError("Provider request failed") from exc
+    raise GenerationError("Provider request failed")
+
+
+def complete_v2(client, messages: list[dict]) -> str:
+    """Return complete model text. Truncated output is retried once with more room, never returned."""
+    max_tokens = int(os.getenv("LLM_MAX_COMPLETION_TOKENS", "6000"))
+    response = _v2_request(client, messages, max_tokens)
+    if response.choices[0].finish_reason == "length":
+        response = _v2_request(client, messages, min(max_tokens * 2, MAX_COMPLETION_CAP))
+        if response.choices[0].finish_reason == "length":
+            raise GenerationError("Model output was truncated twice")
+    return response.choices[0].message.content or ""
+
+
+def generate_v2(client, messages: list[dict]) -> ReportAlternatives:
+    """Generate and schema-check, with one corrective retry naming the errors."""
+    try:
+        return parse_generation(complete_v2(client, messages))
+    except ValueError as exc:
+        errors = str(exc)
+    corrective = [*messages[:-1], {
+        "role": "user",
+        "content": f"{messages[-1]['content']}\n\nYour previous response failed validation. Fix these errors:\n{errors}",
+    }]
+    try:
+        return parse_generation(complete_v2(client, corrective))
+    except ValueError as exc:
+        raise GenerationError("Model output failed validation twice") from exc
+
+
 def build_case_prompt(findings: str, report_format: Optional[str] = None) -> str:
     """Compose the user message from the doctor's findings and optional house format."""
     parts = [
@@ -251,11 +362,14 @@ def generate_reports(user_input: str, report_format: Optional[str] = None) -> Re
         else build_case_prompt(user_input, report_format)
     )
 
-    client = Groq(api_key=GROQ_API_KEY)
     messages = [
         {"role": "system", "content": build_system_prompt(user_input, report_format)},
         {"role": "user", "content": case_text},
     ]
+    if report_engine() == "v2":
+        # Retries are handled in _v2_request; SDK retries would multiply them.
+        return generate_v2(Groq(api_key=GROQ_API_KEY, max_retries=0), messages)
+    client = Groq(api_key=GROQ_API_KEY)
     result, _attempts = generate_validated(client, messages, parse_generation)
     return result
 
