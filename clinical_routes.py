@@ -204,7 +204,9 @@ def review_flag(draft_id: int, flag_id: int, body: FlagReview, request: Request,
     if body.item_index is not None and body.item_index >= len(flag.items):
         _bad("Unknown flag item")
     flag.items = [
-        {**item, "status": body.status} if body.item_index in (None, i) else item
+        {**item, "status": body.status}
+        if body.item_index == i or (body.item_index is None and (item["status"] == "open" or body.status == "open"))
+        else item
         for i, item in enumerate(flag.items)
     ]
     flag.status = rollup_status(flag.items)
@@ -324,16 +326,29 @@ def finalize_draft(draft_id: int, body: FinalizeRequest, request: Request, db: S
     if not variant or not (variant.get("full_report") or "").strip():
         _bad("The selected report is empty")
 
-    # Flags: every flag stored with the draft must be acknowledged.
-    flags = params.get("flags") or []
     now = utcnow()
-    acks = {a.index: a.acknowledged_at for a in body.flag_acknowledgements}
-    if any(i not in acks for i in range(len(flags))):
-        _bad("Acknowledge every flag before finalizing")
-    ack_records = []
-    for i, flag in enumerate(flags):
-        at = acks[i] if acks[i].tzinfo else acks[i].replace(tzinfo=dt.timezone.utc)
-        ack_records.append({"flag": flag, "acknowledged_at": iso_utc(min(at, now))})
+    review_flags = _draft_flags(db, draft.id)
+    if review_flags:
+        outstanding = [f for f in review_flags if f.requires_review and f.status == "open"]
+        if outstanding:
+            raise HTTPException(status_code=409, detail={
+                "code": "flags_outstanding",
+                "message": "Review every flagged item before finalizing",
+                "outstanding": [flag_payload(f) for f in outstanding],
+            })
+        flags = [f.raw_text for f in review_flags]
+        ack_records = [{"flag": f.raw_text, "status": f.status, "acknowledged_at": iso_utc(f.reviewed_at or now)}
+                       for f in review_flags]
+    else:
+        # Drafts from before the review panel keep the acknowledge-each-flag check.
+        flags = params.get("flags") or []
+        acks = {a.index: a.acknowledged_at for a in body.flag_acknowledgements}
+        if any(i not in acks for i in range(len(flags))):
+            _bad("Acknowledge every flag before finalizing")
+        ack_records = []
+        for i, flag in enumerate(flags):
+            at = acks[i] if acks[i].tzinfo else acks[i].replace(tzinfo=dt.timezone.utc)
+            ack_records.append({"flag": flag, "acknowledged_at": iso_utc(min(at, now))})
 
     for err in (clinical.validate_age(body.age_value, body.age_unit), clinical.validate_study_date(body.study_date)):
         if err:

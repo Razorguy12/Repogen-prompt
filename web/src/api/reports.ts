@@ -1,3 +1,4 @@
+import type { ReviewFlag, ReviewStatus } from '../types'
 import { apiFetch, apiFetchBlob } from './client'
 import { getToken } from './client'
 import type {
@@ -88,6 +89,22 @@ export async function generateReport(
   return apiFetch<GenerateReportResponse>('/api/generate-report', {
     method: 'POST',
     body: JSON.stringify(params),
+  })
+}
+
+export function getDraftFlags(draftId: number): Promise<ReviewFlag[]> {
+  return apiFetch(`/api/reports/${draftId}/flags`)
+}
+
+export function reviewDraftFlag(
+  draftId: number,
+  flagId: number,
+  status: ReviewStatus,
+  itemIndex: number | null,
+): Promise<ReviewFlag> {
+  return apiFetch(`/api/reports/${draftId}/flags/${flagId}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ status, item_index: itemIndex }),
   })
 }
 

@@ -539,3 +539,26 @@
   .composer-bar { flex-wrap: wrap; }
   .hint { margin-left: 0; }
 }
+
+/* Review flags: beside the report, below it on narrow screens. */
+.review-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1rem; align-items: start; }
+.review-panel { border: 1px solid #e2e8f0; border-radius: 12px; padding: 0.85rem; background: #fff; display: grid; gap: 0.6rem; font-size: 0.85rem; }
+.review-panel header { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.review-panel h4 { margin: 0; font-size: 0.95rem; font-weight: 700; }
+.review-panel header span, .review-note { color: #475569; font-size: 0.75rem; }
+.review-note { margin: 0; }
+.review-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.6rem; }
+.review-card.is-open { border-color: #fbbf24; background: #fffbeb; }
+.review-card.is-info { color: #475569; background: #f8fafc; }
+.review-card h5 { margin: 0 0 0.35rem; font-size: 0.75rem; font-weight: 700; color: #92400e; }
+.review-card p { margin: 0 0 0.4rem; }
+.review-card summary { cursor: pointer; font-weight: 600; }
+.review-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.35rem; padding: 0.3rem 0; }
+.review-actions { display: inline-flex; gap: 0.3rem; }
+.review-actions button, .review-primary { border: 1px solid #cbd5e1; border-radius: 6px; padding: 0.15rem 0.5rem; background: #fff; font-size: 0.75rem; font-weight: 600; }
+.review-primary { margin-top: 0.4rem; width: 100%; background: #0f766e; border-color: #0f766e; color: #fff; }
+.review-done { color: #0f766e; font-size: 0.75rem; font-weight: 700; }
+.review-pending { color: #92400e; font-size: 0.75rem; }
+.review-link { font-size: 0.75rem; text-decoration: underline; color: #475569; margin-left: 0.4rem; }
+.review-outstanding { display: block; margin-top: 0.4rem; color: #92400e; }
+@media (max-width: 900px) { .review-layout { grid-template-columns: minmax(0, 1fr); } }

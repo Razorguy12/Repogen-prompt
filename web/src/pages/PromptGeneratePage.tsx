@@ -8,18 +8,21 @@ import {
   downloadAlternativeDocx,
   downloadAlternativePdf,
   generateAlternatives,
+  getDraftFlags,
   getReport,
   getReports,
+  reviewDraftFlag,
   updatePromptDraft,
 } from '../api/reports'
 import { getFinalReportForDraft } from '../api/clinical'
 import { FinalizeModal } from '../components/FinalizeModal'
 import { copyText } from '../lib/clipboard'
-import type { PromptSession, ReportAlternative, ReportSummary } from '../types'
+import type { PromptSession, ReportAlternative, ReportSummary, ReviewFlag, ReviewStatus } from '../types'
 import { ApiError } from '../api/client'
 import { ReportDocument } from '../components/ReportDocument'
 import { bodyWordCount } from '../lib/reportSections'
 import { FlagsPanel } from '../components/FlagsPanel'
+import { ReviewPanel, type PendingCorrection } from '../components/ReviewPanel'
 import { ExamChip } from '../components/ExamChip'
 import { InputTips } from '../components/InputTips'
 import { displayRange, parseUtc } from '../lib/reportText'
@@ -112,6 +115,9 @@ export default function PromptGeneratePage() {
   // Flag acknowledgements for the open draft: index -> ISO timestamp.
   const [acks, setAcks] = useState<Record<number, string>>({})
   const [finalizeOpen, setFinalizeOpen] = useState(false)
+  const [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([])
+  const [pendingCorrections, setPendingCorrections] = useState<PendingCorrection[]>([])
+  const editorRef = useRef<HTMLTextAreaElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
 
@@ -142,11 +148,45 @@ export default function PromptGeneratePage() {
 
   const current = session?.reports[active]
   const flags = session?.flags ?? []
-  const allFlagsAcknowledged = flags.every((_, i) => !!acks[i])
+  // Drafts with review records use the panel; older drafts keep per-flag acknowledgement.
+  const gated = reviewFlags.length > 0
+  const outstanding = reviewFlags.filter((f) => f.requires_review && f.status === 'open')
+  const allFlagsAcknowledged = gated ? outstanding.length === 0 : flags.every((_, i) => !!acks[i])
 
   useEffect(() => {
     setAcks({})
+    setPendingCorrections([])
+    setReviewFlags([])
+    if (!session?.id) return
+    let cancelled = false
+    getDraftFlags(session.id)
+      .then((rows) => { if (!cancelled) setReviewFlags(rows) })
+      .catch(() => toast.error('Could not load the review items'))
+    return () => { cancelled = true }
   }, [session?.id])
+
+  const applyReview = async (flag: ReviewFlag, status: ReviewStatus, itemIndex: number | null) => {
+    if (!session) return
+    const updated = await reviewDraftFlag(session.id, flag.id, status, itemIndex)
+    setReviewFlags((rows) => rows.map((r) => (r.id === updated.id ? updated : r)))
+  }
+
+  const handleReview = (flag: ReviewFlag, status: ReviewStatus, itemIndex: number | null) => {
+    applyReview(flag, status, itemIndex).catch((err) =>
+      toast.error(err instanceof ApiError ? err.message : 'Could not save that review'))
+  }
+
+  const handleCorrect = (flag: ReviewFlag, itemIndex: number | null, text: string) => {
+    setPendingCorrections((p) => [...p, { flagId: flag.id, itemIndex }])
+    setEditing(true)
+    window.setTimeout(() => {
+      const box = editorRef.current
+      if (!box) return
+      box.focus()
+      const at = box.value.toLowerCase().indexOf(text.toLowerCase())
+      if (at >= 0) box.setSelectionRange(at, at + text.length)
+    }, 0)
+  }
 
   useEffect(() => {
     if (current) setDraftText(current.full_report)
@@ -205,6 +245,10 @@ export default function PromptGeneratePage() {
       toast.error('Describe the study and findings first')
       return
     }
+    if (session && session.status !== 'final' && reviewFlags.length > 0
+      && !window.confirm('Generate again? This creates a new draft with new flags to review. Your review of this draft does not carry over.')) {
+      return
+    }
     setLoading(true)
     setEditing(false)
     try {
@@ -238,6 +282,12 @@ export default function PromptGeneratePage() {
     try {
       const next = await updatePromptDraft(session.id, { selected: current.type, report: updated })
       applySession(next, false)
+      const corrections = pendingCorrections
+      for (const c of corrections) {
+        const flag = reviewFlags.find((f) => f.id === c.flagId)
+        if (flag) await applyReview(flag, 'corrected', c.itemIndex)
+      }
+      setPendingCorrections([])
       toast.success('Edits saved')
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Save failed')
@@ -257,6 +307,10 @@ export default function PromptGeneratePage() {
     if (!session || !current) return
     if (current.type !== session.selected) {
       toast.error('Select this variant first')
+      return
+    }
+    if (gated && outstanding.length > 0) {
+      document.getElementById('review-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
     if (editing && draftText !== current.full_report) {
@@ -386,7 +440,7 @@ export default function PromptGeneratePage() {
 
               <article className="bubble assistant">
                 <div className="bubble-meta">repogen · three drafts</div>
-                <FlagsPanel
+                {!gated && <FlagsPanel
                   flags={flags}
                   acknowledged={acks}
                   onToggle={session.status === 'final' ? undefined : (i, checked) =>
@@ -396,7 +450,7 @@ export default function PromptGeneratePage() {
                       else delete next[i]
                       return next
                     })}
-                />
+                />}
                 <div className="variant-tabs" role="tablist">
                   {session.reports.map((r, i) => (
                     <button
@@ -414,6 +468,7 @@ export default function PromptGeneratePage() {
                 </div>
 
                 {current && (
+                  <div className={gated ? 'review-layout' : undefined}>
                   <div className="report-sheet">
                     <header>
                       <div>
@@ -432,7 +487,7 @@ export default function PromptGeneratePage() {
 
                     {editing ? (
                       <div className="editor">
-                        <textarea value={draftText} onChange={(e) => setDraftText(e.target.value)} />
+                        <textarea ref={editorRef} value={draftText} onChange={(e) => setDraftText(e.target.value)} />
                         <button type="button" className="accent" onClick={saveEdits}>Save edits to this draft</button>
                       </div>
                     ) : (
@@ -450,15 +505,31 @@ export default function PromptGeneratePage() {
                         : (
                           <button
                             type="button"
-                            className="text-link disabled:opacity-50 disabled:cursor-not-allowed"
+                            className={`text-link ${allFlagsAcknowledged ? '' : 'opacity-50'}`}
                             onClick={finalize}
-                            disabled={!allFlagsAcknowledged}
-                            title={allFlagsAcknowledged ? 'Finalize this report' : 'Acknowledge every flag above before finalizing'}
+                            aria-disabled={!allFlagsAcknowledged}
+                            disabled={!gated && !allFlagsAcknowledged}
+                            title={allFlagsAcknowledged ? 'Finalize this report' : 'Review every flagged item before finalizing'}
                           >
                             Mark as final
                           </button>
                         )}
+                      {gated && outstanding.length > 0 && session?.status !== 'final' && (
+                        <span className="review-outstanding">
+                          Still to review: {outstanding.map((f) => f.items.length === 1 ? f.items[0].text : f.type.replace('_', ' ')).join('; ')}
+                        </span>
+                      )}
                     </footer>
+                  </div>
+                  {gated && (
+                    <ReviewPanel
+                      flags={reviewFlags}
+                      pending={pendingCorrections}
+                      readOnly={session.status === 'final'}
+                      onReview={handleReview}
+                      onCorrect={handleCorrect}
+                    />
+                  )}
                   </div>
                 )}
               </article>
