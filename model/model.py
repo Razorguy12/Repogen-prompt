@@ -89,6 +89,7 @@ class ReportAlternatives(BaseModel):
     exam: ExamInfo
     reports: list[RadiologyReport] = Field(min_length=3, max_length=3)
     flags: list[str]
+    validation_warnings: list[str] = Field(default_factory=list, exclude=True)  # server-set, never from the model
 
     @model_validator(mode="after")
     def _check_order(self):
@@ -308,10 +309,18 @@ def complete_v2(client, messages: list[dict]) -> str:
     return response.choices[0].message.content or ""
 
 
-def generate_v2(client, messages: list[dict]) -> ReportAlternatives:
-    """Generate and schema-check, with one corrective retry naming the errors."""
+def generate_v2(client, messages: list[dict], validator=None) -> ReportAlternatives:
+    """Generate and validate, with one corrective retry naming the errors.
+
+    `validator(result)` raises ValueError on a hard failure and returns warning texts.
+    """
+    def attempt(request_messages):
+        result = parse_generation(complete_v2(client, request_messages))
+        result.validation_warnings = validator(result) if validator else []
+        return result
+
     try:
-        return parse_generation(complete_v2(client, messages))
+        return attempt(messages)
     except ValueError as exc:
         errors = str(exc)
     corrective = [*messages[:-1], {
@@ -319,7 +328,7 @@ def generate_v2(client, messages: list[dict]) -> ReportAlternatives:
         "content": f"{messages[-1]['content']}\n\nYour previous response failed validation. Fix these errors:\n{errors}",
     }]
     try:
-        return parse_generation(complete_v2(client, corrective))
+        return attempt(corrective)
     except ValueError as exc:
         raise GenerationError("Model output failed validation twice") from exc
 
@@ -368,7 +377,9 @@ def generate_reports(user_input: str, report_format: Optional[str] = None) -> Re
     ]
     if report_engine() == "v2":
         # Retries are handled in _v2_request; SDK retries would multiply them.
-        return generate_v2(Groq(api_key=GROQ_API_KEY, max_retries=0), messages)
+        from model.validation import validate_output
+        return generate_v2(Groq(api_key=GROQ_API_KEY, max_retries=0), messages,
+                           validator=lambda result: validate_output(result, user_input, report_format))
     client = Groq(api_key=GROQ_API_KEY)
     result, _attempts = generate_validated(client, messages, parse_generation)
     return result

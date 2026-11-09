@@ -485,6 +485,7 @@ def persist_prompt_session(
         "alternatives": [r.model_dump() for r in alternatives.reports],
         "exam": alternatives.exam.model_dump(),
         "flags": alternatives.flags,
+        "validation_warnings": alternatives.validation_warnings,
         "prompt_version": model.current_prompt_version(),
         "model_id": model.active_model(),
     })
