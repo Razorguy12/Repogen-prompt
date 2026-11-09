@@ -70,21 +70,18 @@ def test_fetal_sex_rule_present_for_obstetric_input():
     assert "NEVER state, imply, or hint at fetal sex" in trimmed
 
 
-def test_clinical_weeks_do_not_pull_in_obstetric_templates():
-    trimmed = b.build_system_prompt("CT brain plain. Headache 2 weeks.")
-    assert "7.8 OBSTETRIC" not in trimmed and "7.17 OTHER" in trimmed
+def test_section_7_is_sent_whole_for_a_recognised_exam():
+    # The all-modality prompt has no numbered 7.x sub-sections to select from.
+    assert _section(FULL, "7").strip() in b.build_system_prompt("CT brain plain. Headache 2 weeks.")
 
 
-def test_gestational_weeks_do_select_obstetric_templates():
-    assert "7.8 OBSTETRIC" in b.build_system_prompt("Scan: 20 weeks 3 days by BPD")
+def test_anomaly_and_fetal_sex_flags_use_fixed_prefixes():
+    assert 'beginning "Not commented upon:"' in " ".join(FULL.split())
+    assert 'add the flag "Fetal sex omitted."' in " ".join(FULL.split())
 
 
 def test_unknown_exam_keeps_every_template():
     assert _section(FULL, "7").strip() in b.build_system_prompt("Brain: 2 cm lesion")
-
-
-def test_custom_format_text_also_selects_templates():
-    assert "7.5 ULTRASOUND NECK" in b.build_system_prompt("2 cm nodule", report_format="Thyroid\nImpression")
 
 
 def test_trimming_can_be_disabled(monkeypatch):
@@ -92,5 +89,5 @@ def test_trimming_can_be_disabled(monkeypatch):
     assert b.build_system_prompt("xray - BVM") == FULL
 
 
-def test_trimmed_is_meaningfully_smaller():
-    assert len(b.build_system_prompt(CASES[0])) < 0.7 * len(FULL)
+def test_trimmed_is_smaller():
+    assert len(b.build_system_prompt(CASES[0])) < len(FULL)

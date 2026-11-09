@@ -198,7 +198,7 @@ class FinalReport(TimestampMixin, Base):
     flags = Column(JSONType, nullable=False, default=list)
     flag_acknowledgements = Column(JSONType, nullable=False, default=list)  # [{flag, acknowledged_at}]
     flags_acknowledged_at = Column(UTCDateTime(), nullable=True)
-    prompt_version = Column(String(16), nullable=True)
+    prompt_version = Column(String(64), nullable=True)
     model_id = Column(String(120), nullable=True)
     finalized_at = Column(UTCDateTime(), nullable=False, default=utcnow)
 
@@ -229,7 +229,7 @@ class Comparison(TimestampMixin, Base):
     edited_summary = Column(Text, nullable=True)
     edited_impression = Column(JSONType, nullable=True)
     status = Column(String(8), nullable=False, default="draft")
-    prompt_version = Column(String(16), nullable=True)
+    prompt_version = Column(String(64), nullable=True)
     model_id = Column(String(120), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 

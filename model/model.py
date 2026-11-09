@@ -122,12 +122,12 @@ def _is_provider_limit(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) in (413, 429)
 
 
-REPORT_PROMPT_VERSION = "v2"
+PROMPT_VERSION = "2026-11-any-modality-v1"
 
 
 def current_prompt_version() -> str:
     """Version stored with each draft; '+trim' marks per-request trimmed prompts (prompt_builder)."""
-    return f"{REPORT_PROMPT_VERSION}+trim" if trimming_enabled() else REPORT_PROMPT_VERSION
+    return f"{PROMPT_VERSION}+trim" if trimming_enabled() else PROMPT_VERSION
 SCHEMA_RETRY_INSTRUCTION = (
     "Your previous output was not valid JSON matching the schema. Return valid JSON only."
 )
