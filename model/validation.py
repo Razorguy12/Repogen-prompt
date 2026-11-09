@@ -13,6 +13,7 @@ from model.report_sections import body_word_count
 ASSUMED_NORMAL_PREFIX = "Assumed normal because not mentioned:"
 TEXT_FIELDS = ("title", "clinical_details", "protocol", "observations", "impression", "full_report")
 REQUIRED_FIELDS = ("word_limit", *TEXT_FIELDS)
+OPTIONAL_FIELDS = ("clinical_details", "protocol")
 
 _OBSTETRIC = re.compile(
     r"obstet|f(o)?etus|f(o)?etal|gestation|pregnan|antenatal|anomaly scan|growth scan|\bnt scan\b|\btiffa\b|\biup\b",
@@ -149,6 +150,10 @@ def warnings(result, findings: str, report_format: str | None = None, check_fiel
 def validate_output(result, findings: str, report_format: str | None = None,
                     check_fields: bool | None = None) -> list[str]:
     """Raise OutputValidationError on a hard failure; otherwise return warning texts."""
+    for report in result.reports:
+        for name in OPTIONAL_FIELDS:  # the prompt's required wording when nothing was supplied
+            if not (getattr(report, name) or "").strip():
+                setattr(report, name, "Not provided")
     errors = hard_failures(result, findings)
     if errors:
         raise OutputValidationError("\n".join(errors))

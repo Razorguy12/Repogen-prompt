@@ -125,3 +125,11 @@ def test_warnings_cannot_come_from_the_model():
     from tests.test_llm_v2 import MSGS, Client, good, reply
     result = m.generate_v2(Client(reply(good())), MSGS, validator=lambda r: ["server warning"])
     assert result.validation_warnings == ["server warning"]
+
+
+def test_empty_clinical_details_and_protocol_become_not_provided():
+    r = build()
+    r.reports[0].clinical_details = ""
+    r.reports[2].protocol = "  "
+    validate_output(r, "CT abdomen liver lesion")
+    assert r.reports[0].clinical_details == "Not provided" and r.reports[2].protocol == "Not provided"
