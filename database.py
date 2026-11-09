@@ -217,6 +217,29 @@ class FinalReport(TimestampMixin, Base):
     )
 
 
+class ReportFlag(Base):
+    """A review item on a draft, shared by all three alternatives."""
+    __tablename__ = "report_flags"
+
+    id = Column(Integer, primary_key=True)
+    draft_id = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(String(32), nullable=False)
+    severity = Column(String(8), nullable=False)
+    raw_text = Column(Text, nullable=False)
+    items = Column(JSONType, nullable=False, default=list)  # [{text, status}]
+    source = Column(String(8), nullable=False)
+    requires_review = Column(Boolean, nullable=False)
+    status = Column(String(16), nullable=False, default="open")
+    reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(UTCDateTime(), nullable=True)
+    created_at = Column(UTCDateTime(), nullable=False, default=utcnow, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'confirmed', 'corrected', 'not_applicable')", name="ck_report_flags_status"),
+        CheckConstraint("source IN ('model', 'server')", name="ck_report_flags_source"),
+    )
+
+
 class Comparison(TimestampMixin, Base):
     __tablename__ = "comparisons"
 

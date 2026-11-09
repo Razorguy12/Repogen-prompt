@@ -14,9 +14,10 @@ from dotenv import load_dotenv
 from groq import Groq
 import pdfplumber
 import model.model as model
+from model.flags import build_flag_records
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_, desc, asc
-from database import (engine, Base, get_db, User, Report, AuditEvent, Patient, FinalReport, upgrade_schema,
+from database import (engine, Base, get_db, User, Report, AuditEvent, Patient, FinalReport, ReportFlag, upgrade_schema,
                       iso_utc)
 import auth
 from audit_service import log_audit_event, csv_safe_cell
@@ -485,7 +486,6 @@ def persist_prompt_session(
         "alternatives": [r.model_dump() for r in alternatives.reports],
         "exam": alternatives.exam.model_dump(),
         "flags": alternatives.flags,
-        "validation_warnings": alternatives.validation_warnings,
         "prompt_version": model.current_prompt_version(),
         "model_id": model.active_model(),
     })
@@ -501,6 +501,10 @@ def persist_prompt_session(
         input_params=input_params,
     )
     db.add(db_report)
+    if model.report_engine() == "v2":
+        db.flush()
+        for record in build_flag_records(alternatives.flags, alternatives.validation_warnings):
+            db.add(ReportFlag(draft_id=db_report.id, **record))
     update_automatic_lock(db, user)
     db.commit()
     db.refresh(db_report)
